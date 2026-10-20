@@ -168,7 +168,11 @@ async def main() -> None:
         except TelegramNetworkError as exc:
             _report_network_problem(exc, channel.description)
             return
-        log.info("Бот запущен, жду сообщений…")
+        try:
+            me = await bot.me()
+            log.info("Бот запущен: @%s (id %s), жду сообщений…", me.username, me.id)
+        except Exception:  # noqa: BLE001
+            log.info("Бот запущен, жду сообщений…")
 
         # выдаём квесты тем, кому положено (и ждём, если срок скоро)
         max_run = float(os.getenv("MAX_RUN_MINUTES", "0") or 0)

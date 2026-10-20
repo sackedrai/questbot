@@ -52,6 +52,7 @@ HELP_TEXT = "\n".join(
         "/profile      профиль\n"
         "/difficulty  сменить сложность\n"
         "/tz           часовой пояс\n"
+        "/invite       ссылка для друзей\n"
         "/clear        очистить чат полностью\n"
         "/help         эта справка</pre>",
         "",
@@ -244,6 +245,24 @@ async def on_tz_custom(message: Message, state: FSMContext) -> None:
             ]
         ),
         reply_markup=main_menu(),
+    )
+
+
+@router.message(Command("invite"))
+async def cmd_invite(message: Message, bot: Bot) -> None:
+    """Ссылка-приглашение для друзей."""
+    me = await bot.me()
+    link = f"https://t.me/{me.username}"
+    await message.answer(
+        "\n".join(
+            [
+                style.header("🔗", "ПРИГЛАШЕНИЕ"),
+                f"Отправь друзьям ссылку:\n\n<b>{link}</b>",
+                "",
+                style.note("Каждый играет сам: своя статистика, свой квест в сутки."),
+                style.note("А в рейтинге видно всех сразу."),
+            ]
+        )
     )
 
 

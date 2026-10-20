@@ -15,7 +15,7 @@ from ..keyboards import difficulty_menu, main_menu, top_menu
 from ..services import build_profile_text, build_top_text, start_quest
 from ..states import Game, Onboarding
 from .. import style
-from ..utils import cleanup_chat, safe_edit
+from ..utils import cleanup_chat, safe_edit, wipe_chat
 
 router = Router()
 
@@ -39,11 +39,12 @@ HELP_TEXT = "\n".join(
         "/top          рейтинг\n"
         "/profile      профиль\n"
         "/difficulty  сменить сложность\n"
-        "/clear        очистить чат от старых сообщений\n"
+        "/clear        очистить чат полностью\n"
         "/help         эта справка</pre>",
         "",
         style.note("Кнопка «Сдаться» — если квест оказался не по силам. "
                    "Без штрафа, можно взять новый."),
+        style.note("/clear — удалит всю переписку в чате, включая твои сообщения."),
         style.footer(),
     ]
 )
@@ -157,13 +158,15 @@ async def cmd_help(message: Message) -> None:
 
 @router.message(Command("clear"))
 async def cmd_clear(message: Message, bot: Bot) -> None:
-    """Удалить прошлые сообщения бота в этом чате."""
-    removed = await cleanup_chat(bot, message.chat.id, db)
+    """Удалить всю переписку в чате - и бота, и пользователя."""
+    deleted, total = await wipe_chat(
+        bot, message.chat.id, db, up_to_id=message.message_id
+    )
     await message.answer(
         "\n".join(
             [
                 style.header("🧹", "ЧАТ ОЧИЩЕН"),
-                style.note(f"Удалено сообщений: {removed}"),
+                style.note(f"Удалено сообщений: {deleted} из {total}"),
             ]
         )
     )
@@ -194,15 +197,21 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
         await safe_edit(callback.message, text, top_menu(scope))
     elif action == "clear":
         # само меню не удаляем - его же будем редактировать
-        removed = await cleanup_chat(
-            bot, callback.message.chat.id, db, keep={callback.message.message_id}
+        tracked = await db.chat_messages(callback.message.chat.id, limit=200)
+        up_to = max([callback.message.message_id, *tracked], default=0)
+        deleted, total = await wipe_chat(
+            bot,
+            callback.message.chat.id,
+            db,
+            up_to_id=up_to,
+            keep={callback.message.message_id},
         )
         await safe_edit(
             callback.message,
             "\n".join(
                 [
                     style.header("🧹", "ЧАТ ОЧИЩЕН"),
-                    style.note(f"Удалено сообщений: {removed}"),
+                    style.note(f"Удалено сообщений: {deleted} из {total}"),
                 ]
             ),
             main_menu(),

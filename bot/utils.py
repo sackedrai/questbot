@@ -28,6 +28,60 @@ async def safe_edit(
         await message.answer(text, reply_markup=reply_markup)
 
 
+async def wipe_chat(
+    bot: Bot,
+    chat_id: int,
+    db,
+    up_to_id: int,
+    margin: int = 20,
+    window: int = 100,
+    keep: Iterable[int] = (),
+) -> tuple[int, int]:
+    """Удалить из чата все сообщения - и бота, и пользователя.
+
+    В личном чате бот имеет право удалять сообщения обеих сторон,
+    поэтому можно вычистить переписку целиком.
+
+    Возвращает (удалено, проверено). Сообщения старше 48 часов Telegram
+    удалять не даёт - их просто пропускаем.
+    """
+    keep_ids = set(keep)
+    tracked = await db.chat_messages(chat_id, limit=200)
+    if tracked:
+        low = max(1, min(tracked) - margin)
+    else:
+        low = max(1, up_to_id - window)
+
+    candidates = [
+        i for i in range(low, up_to_id + 1) if i > 0 and i not in keep_ids
+    ]
+    if not candidates:
+        return 0, 0
+
+    deleted = 0
+    failed: list[int] = []
+
+    # сначала пачками - так быстрее
+    for start in range(0, len(candidates), 50):
+        chunk = candidates[start:start + 50]
+        try:
+            await bot.delete_messages(chat_id, chunk)
+            deleted += len(chunk)
+        except Exception:
+            failed.extend(chunk)
+
+    # что пачкой не вышло - пробуем по одному
+    for message_id in failed:
+        try:
+            await bot.delete_message(chat_id, message_id)
+            deleted += 1
+        except Exception:
+            continue
+
+    await db.forget_messages(chat_id, candidates)
+    return deleted, len(candidates)
+
+
 async def cleanup_chat(
     bot: Bot,
     chat_id: int,

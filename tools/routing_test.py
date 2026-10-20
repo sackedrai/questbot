@@ -32,7 +32,12 @@ from aiogram.types import (  # noqa: E402
     User,
 )
 from aiogram.exceptions import TelegramBadRequest  # noqa: E402
-from aiogram.methods import DeleteMessage, EditMessageText, SendMessage  # noqa: E402
+from aiogram.methods import (  # noqa: E402
+    DeleteMessage,
+    DeleteMessages,
+    EditMessageText,
+    SendMessage,
+)
 
 from bot.db import Database  # noqa: E402
 from bot.handlers import common, games, profile, quests, ranking  # noqa: E402
@@ -71,7 +76,7 @@ class MockSession(AiohttpSession):
                 date=datetime.now(timezone.utc),
                 chat=Chat(id=555, type="private"),
             )
-        if isinstance(method, DeleteMessage):
+        if isinstance(method, (DeleteMessage, DeleteMessages)):
             return True
         if isinstance(method, EditMessageText):
             key = (method.chat_id, method.message_id)
@@ -86,6 +91,16 @@ class MockSession(AiohttpSession):
 
     def method_names(self) -> list[str]:
         return [type(call).__name__ for call in self.calls]
+
+    def deleted_ids(self) -> list[int]:
+        """Все id, которые бот попытался удалить."""
+        ids: list[int] = []
+        for call in self.calls:
+            if isinstance(call, DeleteMessage):
+                ids.append(call.message_id)
+            elif isinstance(call, DeleteMessages):
+                ids.extend(call.message_ids)
+        return ids
 
 
 def build_router():
@@ -226,29 +241,30 @@ async def main() -> None:
     check("EditMessageText" in session.method_names(),
           f"бот показал экран отказа: {session.method_names()}")
 
-    # --- 7. чистка чата: прошлые сообщения бота удаляются ---
-    await db.track_message(555, 9001, "quest")
-    await db.track_message(555, 9002, "quest")
+    # --- 7. очистка чата: удаляется всё в диапазоне ---
+    await db.track_message(555, 12, "quest")
+    await db.track_message(555, 13, "quest")
     session.calls.clear()
     msg_clear = Message(message_id=21, date=datetime.now(timezone.utc),
                         chat=chat, from_user=user, text="/clear")
     await dp.feed_update(bot, Update(update_id=21, message=msg_clear))
-    deleted = [int(c.message_id) for c in session.calls
-               if isinstance(c, DeleteMessage)]
-    check(9001 in deleted and 9002 in deleted,
-          f"прошлые сообщения бота удалены: {deleted}")
+    deleted = session.deleted_ids()
+    check(12 in deleted and 13 in deleted,
+          f"известные сообщения бота удалены: {sorted(deleted)[:8]}")
+    check(any(i < 12 for i in deleted),
+          f"зачищены и неотслеженные сообщения: {min(deleted) if deleted else None}")
+    check(max(deleted) >= 20, "зачищен диапазон до текущего сообщения")
 
     # --- 8. очистка из меню: само меню остаётся ---
-    await db.track_message(555, 9003, "menu")
+    await db.track_message(555, 14, "menu")
     session.calls.clear()
     msg_menu = Message(message_id=22, date=datetime.now(timezone.utc),
                        chat=chat, from_user=user)
     cq_menu = CallbackQuery(id="cq6", from_user=user, chat_instance="ci",
                             data="menu:clear", message=msg_menu)
     await dp.feed_update(bot, Update(update_id=22, callback_query=cq_menu))
-    deleted = [int(c.message_id) for c in session.calls
-               if isinstance(c, DeleteMessage)]
-    check(22 not in deleted, f"меню не удалено при очистке: {deleted}")
+    deleted = session.deleted_ids()
+    check(22 not in deleted, f"меню не удалено при очистке: {sorted(deleted)[:8]}")
     check("EditMessageText" in session.method_names(),
           f"меню переписано в экран очистки: {session.method_names()}")
 

@@ -359,6 +359,23 @@ async def test_daily_logic() -> None:
     check(avail.state == "active",
           f"незаконченный квест блокирует: {avail.state}")
 
+    # квест старше суток протухает
+    import time as _time
+
+    await db.db.execute(
+        "UPDATE quests SET started_at = ? WHERE tg_id = ?",
+        (_time.time() - 90000, 1),
+    )
+    await db.db.commit()
+    avail = await daily.availability(1)
+    check(avail.state != "active",
+          f"залежавшийся квест протухает: {avail.state}")
+    rows = await db.db.execute(
+        "SELECT status FROM quests WHERE tg_id = ?", (1,)
+    )
+    statuses = [row["status"] for row in await rows.fetchall()]
+    check("expired" in statuses, f"протухший помечен: {statuses}")
+
     await db.close()
 
 

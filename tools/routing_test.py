@@ -361,6 +361,22 @@ async def main() -> None:
         check(winner["pvp_wins"] == 1, f"победа засчитана: {winner['pvp_wins']}")
         check(loser["pvp_losses"] == 1, f"поражение засчитано: {loser['pvp_losses']}")
 
+    # --- 12. /quest при активном квесте показывает квест, а не заглушку ---
+    await db.create_user(700, "c", "C")
+    user_c = User(id=700, is_bot=False, first_name="C")
+    chat_c = Chat(id=700, type="private")
+    await db.create_quest(700, "2026-10-21", "quiz", "easy",
+                          {"q": "Вопрос?", "options": ["a", "b", "c", "d"],
+                           "correct": 0, "cat": "тест"})
+    session.calls.clear()
+    msg_again = Message(message_id=50, date=datetime.now(timezone.utc),
+                         chat=chat_c, from_user=user_c, text="/quest")
+    await dp.feed_update(bot, Update(update_id=50, message=msg_again))
+    sent = [c for c in session.calls if isinstance(c, SendMessage)]
+    check(bool(sent), f"квест показан заново: {len(sent)} сообщений")
+    check(any("Вопрос?" in (c.text or "") for c in sent),
+          "это именно квест, а не заглушка")
+
     await db.close()
 
     print("\n" + "=" * 60)

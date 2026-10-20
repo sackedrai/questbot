@@ -303,7 +303,7 @@ class Database:
             SELECT COUNT(*) AS c
               FROM quests
              WHERE tg_id = ? AND day = ? AND risky = ?
-               AND status NOT IN ('failed', 'skipped')
+               AND status NOT IN ('failed', 'skipped', 'expired')
             """,
             (tg_id, day, 1 if risky else 0),
         ) as cur:

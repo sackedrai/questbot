@@ -41,6 +41,7 @@ class QuestStart:
     needs_input: bool = False
     quest_id: Optional[int] = None
     blocked: bool = False
+    existing: bool = False  # это уже выданный квест, показанный заново
 
 
 async def start_quest(
@@ -66,17 +67,20 @@ async def start_quest(
     if pvp_id == 0:
         avail = await availability(tg_id, risky=risky)
         if avail.state == STATE_ACTIVE:
-            return QuestStart(
-                text="\n".join(
-                    [
-                        style.header("⏳", "КВЕСТ ЕЩЁ НЕ ЗАКОНЧЕН"),
-                        style.note(
-                            "Ответь на него или нажми «Сдаться», чтобы взять новый."
-                        ),
-                    ]
-                ),
-                blocked=True,
-            )
+            # показываем текущий незаконченный квест заново,
+            # чтобы не было тупика
+            active = await db.get_active_quest(tg_id)
+            if active is not None:
+                game = get_game(active["game_type"])
+                quest = Quest.from_row(active)
+                render = game.render(quest)
+                return QuestStart(
+                    text=render.text,
+                    markup=render.markup,
+                    needs_input=render.needs_input,
+                    quest_id=active["id"],
+                    existing=True,
+                )
         if avail.state == STATE_COOLDOWN:
             return QuestStart(
                 text="\n".join(

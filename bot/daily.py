@@ -69,8 +69,13 @@ async def availability(tg_id: int, risky: bool = False) -> Availability:
 
     active = await db.get_active_quest(tg_id)
     if active is not None:
-        base = datetime.now(timezone.utc)
-        return Availability(STATE_ACTIVE, base, tz)
+        # квест, который висит дольше суток, протухает - иначе игрок
+        # застревает на нём навсегда
+        if time.time() - (active["started_at"] or 0) > QUEST_COOLDOWN.total_seconds():
+            await db.finish_quest(active["id"], 0, "expired")
+        else:
+            base = datetime.now(timezone.utc)
+            return Availability(STATE_ACTIVE, base, tz)
 
     last = await db.last_done_at(tg_id, risky)
     if last is None:

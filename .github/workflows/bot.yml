@@ -67,8 +67,9 @@ jobs:
           python -m pip install -r requirements.txt
 
       - name: Запустить бота
-        # страховка: если бот зависнет, шаг будет убит и логи загрузятся
-        timeout-minutes: 12
+        # страховка: шаг должен пережить MAX_RUN_MINUTES (115) с запасом,
+        # иначе бот будет убит до того, как сам остановится
+        timeout-minutes: 150
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           DB_PATH: data/questbot.db

@@ -51,6 +51,20 @@ MAX_RESTARTS = 3
 ALERT_COOLDOWN = 6 * 3600
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, "") or default)
+    except ValueError:
+        return default
+
+
 @dataclass
 class State:
     """Состояние сторожа между запусками."""
@@ -156,16 +170,24 @@ def _parse_time(value: Optional[str]) -> float:
         return 0.0
 
 
-def evaluate(runs: list[Run], state: State, now: Optional[float] = None) -> Decision:
+def evaluate(
+    runs: list[Run],
+    state: State,
+    now: Optional[float] = None,
+    stale_hours: Optional[float] = None,
+    max_restarts: Optional[int] = None,
+) -> Decision:
     """Решить, что делать: ничего, перезапустить или alert."""
     now = now if now is not None else time.time()
+    stale_hours = STALE_HOURS if stale_hours is None else stale_hours
+    max_restarts = MAX_RESTARTS if max_restarts is None else max_restarts
 
     good = [run for run in runs if run.ok and run.created_at]
     last_good = max(good, key=lambda run: run.created_at) if good else None
 
     if last_good is not None:
         age_hours = (now - last_good.created_at) / 3600
-        if age_hours <= STALE_HOURS:
+        if age_hours <= stale_hours:
             return Decision(
                 action="none",
                 reason=f"последний успешный прогон {age_hours:.1f} ч назад",
@@ -175,7 +197,7 @@ def evaluate(runs: list[Run], state: State, now: Optional[float] = None) -> Deci
     else:
         reason = "нет ни одного успешного прогона"
 
-    if state.fails < MAX_RESTARTS:
+    if state.fails < max_restarts:
         return Decision(action="restart", reason=reason, last_good=last_good)
 
     return Decision(
@@ -258,10 +280,25 @@ def main() -> int:
         print(f"  не удалось получить прогоны: {exc}")
         return 1
 
-    decision = evaluate(runs, state)
+    stale_hours = _env_float("WATCHDOG_STALE_HOURS", STALE_HOURS)
+    max_restarts = _env_int("WATCHDOG_MAX_RESTARTS", MAX_RESTARTS)
+    decision = evaluate(runs, state, stale_hours=stale_hours, max_restarts=max_restarts)
     state.last_check = time.time()
 
     print(f"  решение: {decision.action} ({decision.reason})")
+
+    if "--test-alert" in sys.argv:
+        text = "\n".join(
+            [
+                style.header("🔔", "ТЕСТ УВЕДОМЛЕНИЯ"),
+                "",
+                style.note("Если ты видишь это сообщение - канал связи работает."),
+                style.note("Сторож пришлёт сюда тревогу, если бот сломается."),
+            ]
+        )
+        sent = send_telegram(bot_token, admin, text) if bot_token else False
+        print(f"  тестовое уведомление: {'отправлено' if sent else 'НЕ отправлено'}")
+        return 0 if sent else 1
 
     if decision.action == "none":
         state.fails = 0

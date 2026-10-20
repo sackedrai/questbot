@@ -15,6 +15,20 @@ on:
   schedule:
     - cron: '*/17 * * * *'
   workflow_dispatch:
+    inputs:
+      test_alert:
+        description: "Проверить канал уведомлений (отправит тестовое сообщение)"
+        type: boolean
+        required: false
+        default: false
+      watchdog_stale_hours:
+        description: "Через сколько часов без прогона считать бота мёртвым"
+        required: false
+        default: "3"
+      watchdog_max_restarts:
+        description: "Сколько перезапусков подряд до тревоги"
+        required: false
+        default: "3"
 
 permissions:
   actions: write
@@ -52,7 +66,13 @@ jobs:
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python tools/watchdog.py
+          WATCHDOG_STALE_HOURS: ${{ inputs.watchdog_stale_hours }}
+          WATCHDOG_MAX_RESTARTS: ${{ inputs.watchdog_max_restarts }}
+        run: |
+          if [ "${{ inputs.test_alert }}" = "true" ]; then
+            python tools/watchdog.py --test-alert
+          else
+            python tools/watchdog.py
 
       - name: Сохранить состояние
         if: always()

@@ -46,6 +46,16 @@ CREATE TABLE IF NOT EXISTS quests (
 CREATE INDEX IF NOT EXISTS idx_quests_user_day ON quests (tg_id, day);
 CREATE INDEX IF NOT EXISTS idx_quests_day       ON quests (day);
 CREATE INDEX IF NOT EXISTS idx_quests_status    ON quests (status);
+
+CREATE TABLE IF NOT EXISTS messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id     INTEGER NOT NULL,
+    message_id  INTEGER NOT NULL,
+    kind        TEXT    DEFAULT 'quest',
+    created_at  REAL    DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages (chat_id, id);
 """
 
 
@@ -222,13 +232,14 @@ class Database:
     async def count_quests_today(self, tg_id: int, day: str, risky: bool) -> int:
         """Сколько квестов этого типа уже занято сегодня.
 
-        Проваленные квесты не считаются — их можно переиграть.
+        Проваленные и пропущенные квесты не считаются - их можно переиграть.
         """
         async with self.db.execute(
             """
             SELECT COUNT(*) AS c
               FROM quests
-             WHERE tg_id = ? AND day = ? AND risky = ? AND status != 'failed'
+             WHERE tg_id = ? AND day = ? AND risky = ?
+               AND status NOT IN ('failed', 'skipped')
             """,
             (tg_id, day, 1 if risky else 0),
         ) as cur:
@@ -258,6 +269,41 @@ class Database:
             (tg_id, day),
         ) as cur:
             return await cur.fetchone()  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------
+    # отслеживание сообщений (для очистки чата)
+    # ------------------------------------------------------------------
+    async def track_message(
+        self, chat_id: int, message_id: int, kind: str = "quest"
+    ) -> None:
+        """Запомнить сообщение бота, чтобы потом удалить его из чата."""
+        await self.db.execute(
+            "INSERT INTO messages (chat_id, message_id, kind, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            (chat_id, message_id, kind, time.time()),
+        )
+        await self.db.commit()
+
+    async def chat_messages(self, chat_id: int, limit: int = 50) -> list[int]:
+        """id сообщений бота в чате, от новых к старым."""
+        async with self.db.execute(
+            "SELECT message_id FROM messages WHERE chat_id = ?"
+            " ORDER BY id DESC LIMIT ?",
+            (chat_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [int(row["message_id"]) for row in rows]
+
+    async def forget_messages(self, chat_id: int, message_ids: list[int]) -> None:
+        """Забыть сообщения (после удаления или когда их уже нельзя удалить)."""
+        if not message_ids:
+            return
+        placeholders = ",".join("?" for _ in message_ids)
+        await self.db.execute(
+            f"DELETE FROM messages WHERE chat_id = ? AND message_id IN ({placeholders})",
+            (chat_id, *message_ids),
+        )
+        await self.db.commit()
 
     # ------------------------------------------------------------------
     # рейтинг

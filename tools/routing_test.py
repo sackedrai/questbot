@@ -31,6 +31,7 @@ from aiogram.types import (  # noqa: E402
     Update,
     User,
 )
+from aiogram.methods import DeleteMessage, SendMessage  # noqa: E402
 
 from bot.db import Database  # noqa: E402
 from bot.handlers import common, games, profile, quests, ranking  # noqa: E402
@@ -50,7 +51,7 @@ def check(condition: bool, label: str) -> None:
 
 
 class MockSession(AiohttpSession):
-    """Сессия без сети: записывает вызовы и возвращает сам метод."""
+    """Сессия без сети: записывает вызовы и возвращает осмысленный ответ."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -58,6 +59,14 @@ class MockSession(AiohttpSession):
 
     async def make_request(self, bot, method, timeout=None):
         self.calls.append(method)
+        if isinstance(method, SendMessage):
+            return Message(
+                message_id=4242,
+                date=datetime.now(timezone.utc),
+                chat=Chat(id=555, type="private"),
+            )
+        if isinstance(method, DeleteMessage):
+            return True
         return method
 
     def method_names(self) -> list[str]:
@@ -182,6 +191,37 @@ async def main() -> None:
               f"текстовый ответ засчитан: {qrow['status']}")
         check("SendMessage" in session.method_names(),
               f"бот ответил на ответ: {session.method_names()}")
+
+    # --- 6. отказ от квеста ---
+    await db.create_user(555, "u", "U")
+    quest_id = await db.create_quest(555, "2026-10-21", "quiz", "easy",
+                                     {"q": "?", "options": ["a", "b", "c", "d"],
+                                      "correct": 0, "cat": "t"})
+    points_before = (await db.get_user(555))["points"]
+    session.calls.clear()
+    msg_skip = Message(message_id=20, date=datetime.now(timezone.utc),
+                        chat=chat, from_user=user)
+    cq_skip = CallbackQuery(id="cq5", from_user=user, chat_instance="ci",
+                            data=f"skip:{quest_id}", message=msg_skip)
+    await dp.feed_update(bot, Update(update_id=20, callback_query=cq_skip))
+    qrow = await db.get_quest(quest_id)
+    check(qrow["status"] == "skipped", f"квест пропущен: {qrow['status']}")
+    check((await db.get_user(555))["points"] == points_before,
+          "за отказ очки не снимаются")
+    check("EditMessageText" in session.method_names(),
+          f"бот показал экран отказа: {session.method_names()}")
+
+    # --- 7. чистка чата: прошлые сообщения бота удаляются ---
+    await db.track_message(555, 9001, "quest")
+    await db.track_message(555, 9002, "quest")
+    session.calls.clear()
+    msg_clear = Message(message_id=21, date=datetime.now(timezone.utc),
+                        chat=chat, from_user=user, text="/clear")
+    await dp.feed_update(bot, Update(update_id=21, message=msg_clear))
+    deleted = [int(c.message_id) for c in session.calls
+               if isinstance(c, DeleteMessage)]
+    check(9001 in deleted and 9002 in deleted,
+          f"прошлые сообщения бота удалены: {deleted}")
 
     await db.close()
 

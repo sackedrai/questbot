@@ -10,7 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..config import TIMELINE_MAX_MISTAKES
 from ..content import TIMELINE_SETS
 from .. import style
-from .base import BaseGame, Quest, Render
+from .base import BaseGame, Quest, Render, add_skip
 
 
 class TimelineGame(BaseGame):
@@ -67,6 +67,7 @@ class TimelineGame(BaseGame):
                 callback_data=f"g:{quest.id}:{index}",
             )
         builder.adjust(1)
+        add_skip(builder, quest.id)
         return Render(text=text, markup=builder.as_markup())
 
     @classmethod

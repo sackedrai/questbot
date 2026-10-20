@@ -14,6 +14,7 @@ def main_menu() -> InlineKeyboardMarkup:
     builder.button(text="⚡ Рискованный квест ×2", callback_data="menu:risk")
     builder.button(text="🏆 Рейтинг", callback_data="menu:top")
     builder.button(text="👤 Профиль", callback_data="menu:profile")
+    builder.button(text="🧹 Очистить чат", callback_data="menu:clear")
     builder.button(text="ℹ️ Как играть", callback_data="menu:help")
     builder.adjust(1)
     return builder.as_markup()

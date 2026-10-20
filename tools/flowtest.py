@@ -57,6 +57,16 @@ class FakeChat:
         self.type = "private"
 
 
+class FakeBot:
+    """Заглушка бота: умеет удалять сообщения."""
+
+    def __init__(self) -> None:
+        self.deleted: list[tuple[int, int]] = []
+
+    async def delete_message(self, chat_id: int, message_id: int) -> None:
+        self.deleted.append((chat_id, message_id))
+
+
 class FakeMessage:
     """Заглушка сообщения: собирает всё, что бот отправил."""
 
@@ -94,10 +104,16 @@ class FakeCallback:
         self.answers.append(text)
 
 
-async def play_quest(db: Database, user: FakeUser, game_type: str, state: FSMContext) -> None:
+async def play_quest(
+    db: Database,
+    user: FakeUser,
+    game_type: str,
+    state: FSMContext,
+    fake_bot: FakeBot,
+) -> None:
     """Пройти квест выбранного типа до конца."""
     quest_msg = FakeMessage("/quest", user)
-    await quests.cmd_quest(quest_msg, state)
+    await quests.cmd_quest(quest_msg, state, fake_bot)
 
     quest_row = await db.get_active_quest(user.id)
     if quest_row is None:
@@ -133,6 +149,7 @@ async def run_flow(db: Database, game_type: str) -> None:
     storage = MemoryStorage()
     user = FakeUser(1000 + list(GAMES).index(game_type))
     state = FSMContext(storage=storage, key=user.id)
+    fake_bot = FakeBot()
     message = FakeMessage("/start", user)
 
     # Форсируем тип мини-игры, чтобы проверить каждую
@@ -140,13 +157,13 @@ async def run_flow(db: Database, game_type: str) -> None:
     services_module.GAME_TYPES = (game_type,)
 
     # 1. Регистрация
-    await common.cmd_start(message, state)
+    await common.cmd_start(message, state, fake_bot)
     check(bool(message.sent), "на /start бот отвечает")
     current_state = await state.get_state()
     check(current_state == Onboarding.nickname.state,
           f"бот просит ник (состояние: {current_state})")
 
-    await common.on_nickname(FakeMessage("  Вася  ", user), state)
+    await common.on_nickname(FakeMessage("  Вася  ", user), state, fake_bot)
     row = await db.get_user(user.id)
     check(row["nickname"] == "Вася", f"ник сохранён: {row['nickname']}")
 
@@ -156,7 +173,7 @@ async def run_flow(db: Database, game_type: str) -> None:
     check(row["difficulty"] == "hard", f"сложность сохранена: {row['difficulty']}")
 
     # 3–5. Квест и ответ
-    await play_quest(db, user, game_type, state)
+    await play_quest(db, user, game_type, state, fake_bot)
     row = await db.get_user(user.id)
     check(row["points"] > 0, f"очки начислены: {row['points']}")
     check(row["quests_done"] == 1, f"квест учтён: {row['quests_done']}")
@@ -166,12 +183,12 @@ async def run_flow(db: Database, game_type: str) -> None:
 
     # 6. Повторный квест в тот же день заблокирован
     again = FakeMessage("/quest", user)
-    await quests.cmd_quest(again, state)
+    await quests.cmd_quest(again, state, fake_bot)
     check("уже пройден" in again.last_text.lower(), "повторный квест дня заблокирован")
 
     # 7. Рискованный квест доступен
     risk_msg = FakeMessage("/risk", user)
-    await quests.cmd_risk(risk_msg, state)
+    await quests.cmd_risk(risk_msg, state, fake_bot)
     check(bool(risk_msg.sent), "рискованный квест выдан")
 
     # 8. Профиль и рейтинг
@@ -203,14 +220,15 @@ async def test_failure(db: Database) -> None:
     storage = MemoryStorage()
     user = FakeUser(2001)
     state = FSMContext(storage=storage, key=user.id)
+    fake_bot = FakeBot()
     message = FakeMessage("/start", user)
 
-    await common.cmd_start(message, state)
-    await common.on_nickname(FakeMessage("Петя", user), state)
+    await common.cmd_start(message, state, fake_bot)
+    await common.on_nickname(FakeMessage("Петя", user), state, fake_bot)
     await common.on_difficulty(FakeCallback("diff:easy", user, message), state)
 
     quest_msg = FakeMessage("/quest", user)
-    await quests.cmd_quest(quest_msg, state)
+    await quests.cmd_quest(quest_msg, state, fake_bot)
     quest_row = await db.get_active_quest(user.id)
     payload = json.loads(quest_row["payload"])
     wrong_index = (payload["correct"] + 1) % len(payload["options"])
@@ -224,7 +242,7 @@ async def test_failure(db: Database) -> None:
     check(row["wrong"] == 1, f"ошибка учтена: {row['wrong']}")
 
     again = FakeMessage("/quest", user)
-    await quests.cmd_quest(again, state)
+    await quests.cmd_quest(again, state, fake_bot)
     check("уже пройден" not in again.last_text.lower(), "после провала квест можно переиграть")
 
 

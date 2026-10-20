@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from aiogram.types import InlineKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 _PUNCT = re.compile(r"[^\w\s]", flags=re.UNICODE)
 
@@ -79,6 +80,14 @@ class Render:
     detail: str = ""
 
 
+def add_skip(builder: InlineKeyboardBuilder, quest_id: int) -> InlineKeyboardBuilder:
+    """Добавить кнопку отказа от квеста отдельной строкой."""
+    builder.row()
+    builder.button(text="⏭ Сдаться", callback_data=f"skip:{quest_id}")
+    builder.adjust(1)
+    return builder
+
+
 class BaseGame:
     """Интерфейс мини-игры.
 
@@ -97,6 +106,14 @@ class BaseGame:
     @classmethod
     def render(cls, quest: Quest) -> Render:
         raise NotImplementedError
+
+    @classmethod
+    def skip_markup(cls, quest_id: int) -> InlineKeyboardMarkup:
+        """Кнопка отказа от квеста."""
+        builder = InlineKeyboardBuilder()
+        builder.button(text="⏭ Сдаться", callback_data=f"skip:{quest_id}")
+        builder.adjust(1)
+        return builder.as_markup()
 
     @classmethod
     async def on_choice(cls, quest: Quest, choice: str) -> Render:

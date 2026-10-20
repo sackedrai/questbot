@@ -10,7 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..config import HINT_PENALTY
 from ..content import RIDDLES
 from .. import style
-from .base import BaseGame, Quest, Render, is_answer_match
+from .base import BaseGame, Quest, Render, add_skip, is_answer_match
 
 MAX_TRIES = 5
 
@@ -50,9 +50,10 @@ class RiddleGame(BaseGame):
                 callback_data=f"g:{quest.id}:hint",
             )
             builder.adjust(1)
+        add_skip(builder, quest.id)
         return Render(
             text="\n".join(lines),
-            markup=builder.as_markup() if builder.buttons else None,
+            markup=builder.as_markup(),
             needs_input=True,
         )
 

@@ -9,7 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..content import QUIZ
 from .. import style
-from .base import BaseGame, Quest, Render
+from .base import BaseGame, Quest, Render, add_skip
 
 
 class QuizGame(BaseGame):
@@ -38,6 +38,7 @@ class QuizGame(BaseGame):
         for index, option in enumerate(payload["options"]):
             builder.button(text=option, callback_data=f"g:{quest.id}:{index}")
         builder.adjust(1)
+        add_skip(builder, quest.id)
         return Render(
             text="\n".join(
                 [

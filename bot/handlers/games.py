@@ -8,9 +8,10 @@ from aiogram.types import CallbackQuery, Message
 
 from ..db import db
 from ..games import Quest, get_game
-from ..keyboards import after_quest_menu
+from ..keyboards import after_quest_menu, main_menu
 from ..services import complete_quest
 from ..states import Game
+from .. import style
 from ..utils import safe_edit
 
 router = Router()
@@ -54,6 +55,42 @@ async def on_game_callback(callback: CallbackQuery, state: FSMContext) -> None:
     summary, _points = await complete_quest(quest, render)
     await state.clear()
     await safe_edit(callback.message, f"{render.text}\n\n{summary}", after_quest_menu())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("skip:"))
+async def on_skip(callback: CallbackQuery, state: FSMContext) -> None:
+    """Отказ от квеста: без штрафа, слот освобождается."""
+    try:
+        quest_id = int(callback.data.split(":", 1)[1])
+    except ValueError:
+        await callback.answer()
+        return
+
+    row = await db.get_quest(quest_id)
+    if row is None:
+        await callback.answer("Квест не найден", show_alert=True)
+        return
+    if row["tg_id"] != callback.from_user.id:
+        await callback.answer("Это не твой квест 👀", show_alert=True)
+        return
+    if row["status"] != "active":
+        await callback.answer("Квест уже завершён", show_alert=True)
+        return
+
+    await db.finish_quest(quest_id, 0, "skipped")
+    await state.clear()
+    await safe_edit(
+        callback.message,
+        "\n".join(
+            [
+                style.header("⏭", "КВЕСТ ПРОПУЩЕН"),
+                style.note("Ничего страшного - сегодня он оказался не твоим."),
+                style.note("Можно взять новый квест: /quest"),
+            ]
+        ),
+        main_menu(),
+    )
     await callback.answer()
 
 

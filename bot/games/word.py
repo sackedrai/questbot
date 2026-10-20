@@ -5,10 +5,12 @@ from __future__ import annotations
 import random
 from typing import Any
 
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
 from ..config import WORD_LIVES
 from ..content import WORDS
 from .. import style
-from .base import BaseGame, Quest, Render, normalize_answer
+from .base import BaseGame, Quest, Render, add_skip, normalize_answer
 
 
 class WordGame(BaseGame):
@@ -52,7 +54,13 @@ class WordGame(BaseGame):
             "",
             style.note("Отправь одну букву или всё слово целиком"),
         ]
-        return Render(text="\n".join(lines), needs_input=True)
+        builder = InlineKeyboardBuilder()
+        add_skip(builder, quest.id)
+        return Render(
+            text="\n".join(lines),
+            markup=builder.as_markup(),
+            needs_input=True,
+        )
 
     @classmethod
     async def on_text(cls, quest: Quest, text: str) -> Render:

@@ -159,8 +159,16 @@ async def probe(channel: Channel, token: str, timeout: float = PROBE_TIMEOUT) ->
             ) as response:
                 body = await response.text()
                 compact = body.replace(" ", "")
+                username = ""
+                try:
+                    username = json.loads(body).get("result", {}).get("username", "")
+                except Exception:  # noqa: BLE001
+                    username = ""
                 if '"ok":true' in compact:
-                    return ProbeResult(channel, True, True, "доступен, токен принят")
+                    detail = "доступен, токен принят"
+                    if username:
+                        detail += f"  (@{username})"
+                    return ProbeResult(channel, True, True, detail)
                 if response.status == 401:
                     return ProbeResult(channel, True, False, "доступен, но токен отклонён (401)")
                 return ProbeResult(channel, True, False, f"доступен, ответ HTTP {response.status}")

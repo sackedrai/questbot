@@ -73,6 +73,7 @@ jobs:
             python tools/watchdog.py --test-alert
           else
             python tools/watchdog.py
+          fi
 
       - name: Сохранить состояние
         if: always()

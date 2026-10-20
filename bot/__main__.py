@@ -185,7 +185,8 @@ async def main() -> None:
         max_run = float(os.getenv("MAX_RUN_MINUTES", "0") or 0)
         daily_task = asyncio.create_task(_daily_pass(bot, max_run))
         try:
-            await dp.start_polling(bot)
+            # именно _run_polling: он останавливает поллинг по таймеру
+            await _run_polling(dp, bot)
         finally:
             daily_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

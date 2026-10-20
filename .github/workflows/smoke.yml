@@ -39,3 +39,4 @@ jobs:
           python tools/selftest.py
           python tools/flowtest.py
           python tools/routing_test.py
+          python tools/polling_test.py

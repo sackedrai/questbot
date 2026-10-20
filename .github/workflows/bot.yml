@@ -67,6 +67,8 @@ jobs:
           python -m pip install -r requirements.txt
 
       - name: Запустить бота
+        # страховка: если бот зависнет, шаг будет убит и логи загрузятся
+        timeout-minutes: 12
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           DB_PATH: data/questbot.db

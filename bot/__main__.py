@@ -184,11 +184,16 @@ async def main() -> None:
             with contextlib.suppress(asyncio.CancelledError):
                 await daily_task
     finally:
+        log.info("Завершаюсь: закрываю сессию")
         await bot.session.close()
+        log.info("Завершаюсь: закрываю базу")
         await db.close()
+        log.info("Завершаюсь: делаю бэкап")
         # даже если бот упал - сохраняем базу и поддерживаем цепочку прогонов
         await _backup_database()
+        log.info("Завершаюсь: запускаю следующий прогон")
         _dispatch_next_run()
+        log.info("Завершился")
 
 
 async def _backup_database() -> None:

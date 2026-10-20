@@ -40,12 +40,14 @@ CREATE TABLE IF NOT EXISTS quests (
     status      TEXT    DEFAULT 'active',
     risky       INTEGER DEFAULT 0,
     started_at  REAL    DEFAULT 0,
-    finished_at REAL    DEFAULT 0
+    finished_at REAL    DEFAULT 0,
+    item_key    TEXT    DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_quests_user_day ON quests (tg_id, day);
 CREATE INDEX IF NOT EXISTS idx_quests_day       ON quests (day);
 CREATE INDEX IF NOT EXISTS idx_quests_status    ON quests (status);
+CREATE INDEX IF NOT EXISTS idx_quests_user_key  ON quests (tg_id, item_key);
 
 CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,6 +93,7 @@ MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     ],
     "quests": [
         ("pvp_id", "INTEGER DEFAULT 0"),
+        ("item_key", "TEXT DEFAULT ''"),
     ],
 }
 
@@ -263,12 +266,13 @@ class Database:
         payload: dict[str, Any],
         risky: bool = False,
         pvp_id: int = 0,
+        item_key: str = "",
     ) -> int:
         cur = await self.db.execute(
             """
             INSERT INTO quests (tg_id, day, game_type, difficulty, payload, risky,
-                                pvp_id, started_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                pvp_id, started_at, item_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 tg_id,
@@ -279,10 +283,34 @@ class Database:
                 1 if risky else 0,
                 pvp_id,
                 time.time(),
+                item_key,
             ),
         )
         await self.db.commit()
         return int(cur.lastrowid)
+
+    async def used_item_keys(self, tg_id: int) -> set[str]:
+        """Ключи заданий, которые игрок уже получал.
+
+        Ротатор по этому набору не выдаёт прошлое повторно.
+        """
+        async with self.db.execute(
+            "SELECT DISTINCT item_key FROM quests"
+            " WHERE tg_id = ? AND item_key != ''",
+            (tg_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return {row["item_key"] for row in rows}
+
+    async def count_used_items(self, tg_id: int) -> int:
+        """Сколько разных заданий игрок уже прошёл."""
+        async with self.db.execute(
+            "SELECT COUNT(DISTINCT item_key) AS c FROM quests"
+            " WHERE tg_id = ? AND item_key != ''",
+            (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        return int(row["c"]) if row else 0
 
     async def get_quest(self, quest_id: int) -> Optional[aiosqlite.Row]:
         async with self.db.execute(
@@ -359,6 +387,53 @@ class Database:
         ) as cur:
             row = await cur.fetchone()
         return row["t"] if row and row["t"] else None
+
+    # ------------------------------------------------------------------
+    # массовые выборки (для ежедневного обхода без запроса на игрока)
+    # ------------------------------------------------------------------
+    async def active_quests_map(self) -> dict[int, aiosqlite.Row]:
+        """Активный (незавершённый) квест каждого игрока: tg_id -> строка."""
+        async with self.db.execute(
+            "SELECT * FROM quests WHERE status = 'active' ORDER BY id DESC"
+        ) as cur:
+            rows = await cur.fetchall()
+        result: dict[int, aiosqlite.Row] = {}
+        for row in rows:
+            # id DESC + setdefault = самый свежий квест игрока
+            result.setdefault(row["tg_id"], row)
+        return result
+
+    async def last_done_map(self, risky: bool = False) -> dict[int, float]:
+        """Когда каждый игрок последний раз проходил квест: tg_id -> время."""
+        async with self.db.execute(
+            "SELECT tg_id, MAX(finished_at) AS t FROM quests"
+            " WHERE status = 'done' AND risky = ? GROUP BY tg_id",
+            (1 if risky else 0,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return {row["tg_id"]: row["t"] for row in rows if row["t"]}
+
+    async def last_issued_map(self) -> dict[int, float]:
+        """Когда каждому игроку последний раз выдавали квест: tg_id -> время."""
+        async with self.db.execute(
+            "SELECT tg_id, MAX(started_at) AS t FROM quests GROUP BY tg_id"
+        ) as cur:
+            rows = await cur.fetchall()
+        return {row["tg_id"]: row["t"] for row in rows if row["t"]}
+
+    async def finish_expired_quests(self, max_age: float) -> int:
+        """Закрыть квесты, которые висят дольше max_age секунд.
+
+        Возвращает число закрытых - иначе игрок застревает на старом квесте.
+        """
+        now = time.time()
+        cur = await self.db.execute(
+            "UPDATE quests SET status = 'expired', finished_at = ?"
+            " WHERE status = 'active' AND started_at > 0 AND started_at < ?",
+            (now, now - max_age),
+        )
+        await self.db.commit()
+        return cur.rowcount or 0
 
     async def best_day_points(self, tg_id: int) -> int:
         """Лучший день игрока по сумме очков."""

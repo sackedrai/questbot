@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import random
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -635,6 +636,190 @@ async def test_error_counter() -> None:
     await db.close()
 
 
+async def test_rotator() -> None:
+    """Ротатор контента: не выдаём пройденное повторно."""
+    section("Ротатор контента")
+
+    import random
+
+    import bot.adaptive as adaptive
+    import bot.daily as daily
+    import bot.services as services
+    from bot.games import get_game
+    from bot.games.base import pick_unseen
+
+    db = Database(":memory:")
+    await db.connect()
+    services.db = db
+    daily.db = db
+    adaptive.db = db
+
+    try:
+        # чистый помощник: пока пул не исчерпан - берём непроходимое
+        pool = [{"q": "а"}, {"q": "б"}, {"q": "в"}]
+        rng = random.Random(0)
+        item, exhausted = pick_unseen(pool, lambda x: x["q"], rng, set())
+        check(not exhausted and item["q"] in {"а", "б", "в"}, f"первый выбор: {item['q']}")
+        item, exhausted = pick_unseen(pool, lambda x: x["q"], rng, {"а", "б"})
+        check(item["q"] == "в" and not exhausted, f"выбрано непроходимое: {item['q']}")
+        item, exhausted = pick_unseen(pool, lambda x: x["q"], rng, {"а", "б", "в"})
+        check(exhausted, "банк исчерпан - сигнал игроку")
+
+        # реальная выдача: 12 квестов одного типа - все разные
+        await db.create_user(1)
+        await db.set_nickname(1, "Тест")
+        game = get_game("quiz")
+        keys: list[str] = []
+        for i in range(12):
+            used = await db.used_item_keys(1)
+            payload = await game.build("easy", random.Random(i), exclude=used)
+            key = payload["_key"]
+            keys.append(key)
+            await db.create_quest(
+                1, "2026-10-21", "quiz", "easy", payload, item_key=key
+            )
+        check(len(set(keys)) == 12, f"12 квестов - 12 разных заданий: {len(set(keys))}")
+        check(await db.used_item_keys(1) == set(keys), "база помнит пройденные ключи")
+        check(await db.count_used_items(1) == 12, "счётчик уникальных заданий: 12")
+
+        # служебные квесты закрываем, чтобы они не перехватывали выдачу
+        await db.db.execute(
+            "UPDATE quests SET status = 'skipped' WHERE tg_id = 1 AND status = 'active'"
+        )
+        await db.db.commit()
+
+        # сервисный путь: второй квест не повторяет первый
+        q1 = await services.start_quest(1, game_type="quiz")
+        check(q1.quest_id is not None, "первый квест выдан")
+        row1 = await db.get_quest(q1.quest_id)
+        # отматываем "прошёл 25 часов назад", чтобы обойти правило 24 часов
+        await db.db.execute(
+            "UPDATE quests SET finished_at = ? WHERE id = ?",
+            (time.time() - 90000, q1.quest_id),
+        )
+        await db.db.execute(
+            "UPDATE quests SET status = 'done' WHERE id = ?", (q1.quest_id,)
+        )
+        await db.db.commit()
+
+        q2 = await services.start_quest(1, game_type="quiz")
+        row2 = await db.get_quest(q2.quest_id)
+        check(
+            row1["item_key"] != row2["item_key"],
+            f"второй квест другой: {row2['item_key']}",
+        )
+        check(bool(row2["item_key"]), "ключ задания сохранён в базе")
+        check("_key" not in row2["payload"], "служебный ключ убран из payload")
+
+        # когда все задания пройдены - честно говорим об этом
+        used = await db.used_item_keys(1)
+        payload = await game.build("easy", random.Random(7), exclude=used)
+        check("_exhausted" in payload, "в payload есть признак исчерпания банка")
+    finally:
+        await db.close()
+
+
+async def test_novice_level() -> None:
+    """Новичку сложный уровень не достаётся."""
+    section("Ограничение для новичка")
+
+    import random
+
+    import bot.adaptive as adaptive
+
+    db = Database(":memory:")
+    await db.connect()
+    adaptive.db = db
+    await db.create_user(1)
+
+    try:
+        # одна удачная попытка - ещё новичок
+        quest_id = await db.create_quest(1, "2026-10-21", "quiz", "easy", {"q": "?"})
+        await db.finish_quest(quest_id, 30, "done")
+
+        level = await adaptive.current_level(1)
+        check(level != "hard", f"новичку не дают сложный уровень: {level}")
+        check(level in ("easy", "medium"), f"уровень новичка: {level}")
+
+        picked = await adaptive.pick_difficulty(1, random.Random(5))
+        check(picked != "hard", f"и случайность не выдаст сложный: {picked}")
+
+        # с шестью успехами - уже не новичок, сложный доступен
+        for _ in range(6):
+            quest_id = await db.create_quest(
+                1, "2026-10-22", "quiz", "easy", {"q": "?"}
+            )
+            await db.finish_quest(quest_id, 30, "done")
+        level = await adaptive.current_level(1)
+        check(level == "hard", f"после серии успехов сложный уровень есть: {level}")
+    finally:
+        await db.close()
+
+
+async def test_daily_pass_batch() -> None:
+    """Массовый обход: квесты выдаются тем, кому положено."""
+    section("Массовая раздача квестов")
+
+    import bot.adaptive as adaptive
+    import bot.daily as daily
+    import bot.services as services
+
+    class FakeBot:
+        def __init__(self) -> None:
+            self.sent: list[int] = []
+
+        async def send_message(self, chat_id: int, text: str, **kwargs) -> None:
+            self.sent.append(chat_id)
+
+    db = Database(":memory:")
+    await db.connect()
+    daily.db = db
+    services.db = db
+    adaptive.db = db
+
+    try:
+        # игрок, которому квест положен давно
+        await db.create_user(1)
+        await db.set_nickname(1, "Первый")
+        quest_id = await db.create_quest(1, "2026-10-18", "quiz", "easy", {"q": "?"})
+        await db.finish_quest(quest_id, 10, "done")
+        await db.db.execute(
+            "UPDATE quests SET finished_at = ?, started_at = ? WHERE id = ?",
+            (time.time() - 90000, time.time() - 90000, quest_id),
+        )
+        await db.db.commit()
+
+        # игрок, у которого квест ещё не положен
+        await db.create_user(2)
+        await db.set_nickname(2, "Второй")
+        quest_id = await db.create_quest(2, "2026-10-21", "quiz", "easy", {"q": "?"})
+        await db.finish_quest(quest_id, 10, "done")
+
+        # игрок с активным квестом
+        await db.create_user(3)
+        await db.set_nickname(3, "Третий")
+        await db.create_quest(3, "2026-10-21", "quiz", "easy", {"q": "?"})
+
+        # игрок с выключенными уведомлениями
+        await db.create_user(4)
+        await db.set_nickname(4, "Четвёртый")
+        await db.set_notify(4, False)
+        quest_id = await db.create_quest(4, "2026-10-18", "quiz", "easy", {"q": "?"})
+        await db.finish_quest(quest_id, 10, "done")
+        await db.db.execute(
+            "UPDATE quests SET finished_at = ?, started_at = ? WHERE id = ?",
+            (time.time() - 90000, time.time() - 90000, quest_id),
+        )
+        await db.db.commit()
+
+        bot = FakeBot()
+        issued = await daily.run_daily_pass(bot, max_wait=0)
+        check(issued == 1, f"выдан один квест (тому, кому положен): {issued}")
+        check(bot.sent == [1], f"квест получил нужный игрок: {bot.sent}")
+    finally:
+        await db.close()
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -646,6 +831,9 @@ async def main() -> None:
     await test_tracking_session()
     await test_daily_logic()
     await test_adaptive_and_notify()
+    await test_rotator()
+    await test_novice_level()
+    await test_daily_pass_batch()
     await test_backup()
     test_watchdog_logic()
     await test_error_counter()

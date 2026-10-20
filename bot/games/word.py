@@ -10,7 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..config import WORD_LIVES
 from ..content import WORDS
 from .. import style
-from .base import BaseGame, Quest, Render, add_skip, normalize_answer
+from .base import BaseGame, Quest, Render, add_skip, normalize_answer, pick_unseen
 
 
 class WordGame(BaseGame):
@@ -18,8 +18,13 @@ class WordGame(BaseGame):
     title = "Угадай слово"
 
     @classmethod
-    async def build(cls, difficulty: str, rng: random.Random) -> dict[str, Any]:
-        item = rng.choice(WORDS)
+    async def build(
+        cls,
+        difficulty: str,
+        rng: random.Random,
+        exclude: set[str] | None = None,
+    ) -> dict[str, Any]:
+        item, exhausted = pick_unseen(WORDS, cls.item_key, rng, exclude)
         word = item["w"]
         return {
             "word": word,
@@ -27,7 +32,13 @@ class WordGame(BaseGame):
             "revealed": [],
             "wrong": [],
             "lives": WORD_LIVES,
+            "_key": cls.item_key(item),
+            "_exhausted": exhausted,
         }
+
+    @classmethod
+    def item_key(cls, item: dict[str, Any]) -> str:
+        return f"word:{item['w']}"
 
     @classmethod
     def render(cls, quest: Quest) -> Render:

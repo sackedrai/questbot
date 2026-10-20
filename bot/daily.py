@@ -61,12 +61,45 @@ class Availability:
         return self.local_due().strftime("%H:%M")
 
 
+def _availability_state(
+    *,
+    active_started_at: Optional[float],
+    last_done: Optional[float],
+    created_at: float,
+    now: float,
+) -> tuple[str, datetime]:
+    """Чистый расчёт доступности квеста.
+
+    Возвращает (состояние, момент доступности). Вынесено отдельно, чтобы
+    одиночный запрос и массовый обход считали по одним и тем же правилам.
+    """
+    if active_started_at is not None:
+        return STATE_ACTIVE, datetime.fromtimestamp(now, tz=timezone.utc)
+
+    if last_done is None:
+        due = datetime.fromtimestamp(created_at, tz=timezone.utc)
+    else:
+        due = datetime.fromtimestamp(last_done, tz=timezone.utc) + QUEST_COOLDOWN
+
+    state = STATE_DUE if now >= due.timestamp() else STATE_COOLDOWN
+    return state, due
+
+
+def _apply_issued_limit(moment: datetime, last_issued: Optional[float]) -> datetime:
+    """Не выдавать квест раньше, чем сутки после прошлой выдачи."""
+    if not last_issued:
+        return moment
+    limit = datetime.fromtimestamp(last_issued, tz=timezone.utc) + QUEST_COOLDOWN
+    return limit if limit > moment else moment
+
+
 async def availability(tg_id: int, risky: bool = False) -> Availability:
     """Посчитать, когда игроку доступен очередной квест."""
     user = await db.get_user(tg_id)
     tz_raw = user["tz_offset"] if user else None
     tz = DEFAULT_TZ if tz_raw is None else int(tz_raw)
 
+    active_started: Optional[float] = None
     active = await db.get_active_quest(tg_id)
     if active is not None:
         # квест, который висит дольше суток, протухает - иначе игрок
@@ -74,20 +107,17 @@ async def availability(tg_id: int, risky: bool = False) -> Availability:
         if time.time() - (active["started_at"] or 0) > QUEST_COOLDOWN.total_seconds():
             await db.finish_quest(active["id"], 0, "expired")
         else:
-            base = datetime.now(timezone.utc)
-            return Availability(STATE_ACTIVE, base, tz)
+            active_started = active["started_at"] or 0
 
     last = await db.last_done_at(tg_id, risky)
-    if last is None:
-        # первый квест доступен сразу после регистрации
-        created = user["created_at"] if user else time.time()
-        due = datetime.fromtimestamp(created, tz=timezone.utc)
-    else:
-        due = datetime.fromtimestamp(last, tz=timezone.utc) + QUEST_COOLDOWN
-
-    if time.time() >= due.timestamp():
-        return Availability(STATE_DUE, due, tz)
-    return Availability(STATE_COOLDOWN, due, tz)
+    created = user["created_at"] if user else time.time()
+    state, due = _availability_state(
+        active_started_at=active_started,
+        last_done=last,
+        created_at=created,
+        now=time.time(),
+    )
+    return Availability(state, due, tz)
 
 
 async def auto_moment(tg_id: int) -> Optional[datetime]:
@@ -101,13 +131,8 @@ async def auto_moment(tg_id: int) -> Optional[datetime]:
     if avail.state == STATE_ACTIVE:
         return None
 
-    moment = avail.due_at
     last_issued = await db.last_issued_at(tg_id)
-    if last_issued:
-        limit = datetime.fromtimestamp(last_issued, tz=timezone.utc) + QUEST_COOLDOWN
-        if limit > moment:
-            moment = limit
-    return moment
+    return _apply_issued_limit(avail.due_at, last_issued)
 
 
 async def send_daily_quest(bot: Bot, tg_id: int) -> bool:
@@ -135,21 +160,52 @@ async def run_daily_pass(bot: Bot, max_wait: float = 0.0) -> int:
     Если квест положен скоро (в пределах max_wait секунд), бот дождётся
     нужного момента и отправит его ровно в срок. Остальных обработает
     следующий запуск.
+
+    Считаем массово: несколько запросов на всех игроков вместо десятка
+    запросов на каждого.
     """
     now = time.time()
+    users = await db.all_users()
+    if not users:
+        return 0
+
+    # протухшие квесты закрываем разом - иначе игрок застревает на старом
+    await db.finish_expired_quests(QUEST_COOLDOWN.total_seconds())
+
+    active_map = await db.active_quests_map()
+    done_map = await db.last_done_map()
+    issued_map = await db.last_issued_map()
+
     plan: list[tuple[float, int]] = []
 
-    for user in await db.all_users():
-        if not await db.notify_enabled(user["tg_id"]):
+    for user in users:
+        notify = user["notify"]
+        if notify is not None and not notify:
             continue  # игрок выключил уведомления
-        moment = await auto_moment(user["tg_id"])
-        if moment is None:
+        tg_id = user["tg_id"]
+
+        active_started: Optional[float] = None
+        active = active_map.get(tg_id)
+        if active is not None:
+            started = active["started_at"] or 0
+            if started and now - started <= QUEST_COOLDOWN.total_seconds():
+                active_started = started
+
+        state, due = _availability_state(
+            active_started_at=active_started,
+            last_done=done_map.get(tg_id),
+            created_at=user["created_at"] or now,
+            now=now,
+        )
+        if state == STATE_ACTIVE:
             continue
+
+        moment = _apply_issued_limit(due, issued_map.get(tg_id))
         wait = moment.timestamp() - now
         if wait <= 0:
-            plan.append((0.0, user["tg_id"]))
+            plan.append((0.0, tg_id))
         elif wait <= max_wait:
-            plan.append((wait, user["tg_id"]))
+            plan.append((wait, tg_id))
 
     plan.sort(key=lambda item: item[0])
     issued = 0

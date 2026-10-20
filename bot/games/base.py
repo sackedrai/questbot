@@ -5,12 +5,33 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional, Sequence
 
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 _PUNCT = re.compile(r"[^\w\s]", flags=re.UNICODE)
+
+
+def pick_unseen(
+    pool: Sequence[Any],
+    key_of: Callable[[Any], str],
+    rng: Any,
+    exclude: Optional[set[str]] = None,
+) -> tuple[Any, bool]:
+    """Выбрать задание, которого игрок ещё не проходил.
+
+    ``exclude`` - ключи уже пройденных заданий (ротатор).
+    Возвращает пару (задание, банк_исчерпан). Если непроходимых заданий не
+    осталось - берём из полного пула: контент прокрутился заново, об этом
+    честно говорим игроку.
+    """
+    exclude = exclude or set()
+    fresh = [item for item in pool if key_of(item) not in exclude]
+    if fresh:
+        return rng.choice(fresh), False
+    return rng.choice(list(pool)), True
+
 
 
 def normalize_answer(text: str) -> str:
@@ -110,8 +131,24 @@ class BaseGame:
     timed: bool = False
 
     @classmethod
-    async def build(cls, difficulty: str, rng: Any) -> dict[str, Any]:
+    async def build(
+        cls,
+        difficulty: str,
+        rng: Any,
+        exclude: Optional[set[str]] = None,
+    ) -> dict[str, Any]:
+        """Собрать задание.
+
+        ``exclude`` - ключи заданий, которые игрок уже проходил: если такие
+        есть, выбираем из оставшихся. В payload кладём ``_key`` (ключ
+        задания для ротатора) и ``_exhausted`` (банк исчерпан).
+        """
         raise NotImplementedError
+
+    @classmethod
+    def item_key(cls, item: Any) -> str:
+        """Ключ задания - по нему ротатор видит, что игрок это уже проходил."""
+        return str(item)
 
     @classmethod
     def render(cls, quest: Quest) -> Render:

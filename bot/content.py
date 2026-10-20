@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+
+def total_items() -> int:
+    """Сколько всего заданий в банке (для прогресса в профиле)."""
+    return len(QUIZ) + len(FAST_QUIZ) + len(RIDDLES) + len(WORDS) + len(TIMELINE_SETS)
+
 # ---------------------------------------------------------------------------
 # Викторина: q — вопрос, options — 4 варианта, correct — индекс верного,
 # cat — категория, diff — сложность.

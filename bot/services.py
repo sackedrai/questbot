@@ -14,6 +14,7 @@ from .config import (
     QUEST_PER_DAY,
     RISK_PENALTY,
 )
+from .content import total_items
 from .db import db, today_iso
 from .daily import STATE_ACTIVE, STATE_COOLDOWN, availability
 from .games import Quest, Render, get_game
@@ -106,9 +107,16 @@ async def start_quest(
     game = get_game(game_type)
 
     if payload is None:
-        payload = await game.build(difficulty, rng)
+        # ротатор: не выдаём то, что игрок уже проходил
+        used = await db.used_item_keys(tg_id)
+        payload = await game.build(difficulty, rng, exclude=used)
+
+    payload = dict(payload)
+    item_key = str(payload.pop("_key", ""))
+    exhausted = bool(payload.pop("_exhausted", False))
+
     quest_id = await db.create_quest(
-        tg_id, day, game_type, difficulty, payload, risky, pvp_id
+        tg_id, day, game_type, difficulty, payload, risky, pvp_id, item_key
     )
 
     quest = Quest(
@@ -137,6 +145,12 @@ async def start_quest(
         )
     elif difficulty:
         header = style.note(f"Сложность: {adaptive.describe(difficulty)}") + "\n"
+
+    if exhausted:
+        header += (
+            style.note("Все задания этой игры уже пройдены — начинаем сначала.")
+            + "\n"
+        )
 
     return QuestStart(
         text=header + render.text,
@@ -249,6 +263,7 @@ async def build_profile_text(tg_id: int) -> str:
     today_points = day_summary["points"]
     best_day = await db.best_day_points(tg_id)
     adaptive_level = await adaptive.current_level(tg_id)
+    unique_items = await db.count_used_items(tg_id)
 
     parts = [
         style.header("👤", "ПРОФИЛЬ", f"{nickname}  ·  🎖 уровень {level}"),
@@ -278,6 +293,7 @@ async def build_profile_text(tg_id: int) -> str:
                 ("", "Квестов", str(done)),
                 ("", "Успешно", f"{correct}  ({accuracy}%)"),
                 ("", "Провалено", str(user["wrong"])),
+                ("", "Уникальных", f"{unique_items} из {total_items()}"),
             ]
         ),
         style.section("⚔️ PvP"),

@@ -10,7 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..config import TIMELINE_MAX_MISTAKES
 from ..content import TIMELINE_SETS
 from .. import style
-from .base import BaseGame, Quest, Render, add_skip
+from .base import BaseGame, Quest, Render, add_skip, pick_unseen
 
 
 class TimelineGame(BaseGame):
@@ -18,16 +18,34 @@ class TimelineGame(BaseGame):
     title = "Хронология"
 
     @classmethod
-    async def build(cls, difficulty: str, rng: random.Random) -> dict[str, Any]:
+    async def build(
+        cls,
+        difficulty: str,
+        rng: random.Random,
+        exclude: set[str] | None = None,
+    ) -> dict[str, Any]:
         # Явно сортируем по числовому ключу — так порядок не зависит от
         # того, как события лежат в исходном наборе.
+        chosen, exhausted = pick_unseen(TIMELINE_SETS, cls.item_key, rng, exclude)
         items = sorted(
-            (dict(item) for item in rng.choice(TIMELINE_SETS)),
+            (dict(item) for item in chosen),
             key=lambda item: item["year_num"],
         )
         order = list(range(len(items)))
         rng.shuffle(order)
-        return {"items": items, "order": order, "collected": [], "mistakes": 0}
+        return {
+            "items": items,
+            "order": order,
+            "collected": [],
+            "mistakes": 0,
+            "_key": cls.item_key(chosen),
+            "_exhausted": exhausted,
+        }
+
+    @classmethod
+    def item_key(cls, item: list[dict[str, Any]]) -> str:
+        # набор событий опознаём по его содержимому, порядок не важен
+        return "timeline:" + "|".join(sorted(str(e.get("text", "")) for e in item))
 
     @classmethod
     def render(cls, quest: Quest) -> Render:

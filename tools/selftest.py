@@ -538,6 +538,46 @@ def test_watchdog_logic() -> None:
           f"дата прогона разобрана: {stamp}")
     check(_parse_time(None) == 0.0, "пустая дата не ломает разбор")
 
+    # проверка здоровья по метрикам
+    from tools.watchdog import ERROR_THRESHOLD, SELFCHECK_MAX_AGE, check_health
+
+    now = 1_700_000_000.0
+    check(check_health({}, now) == [], "без метрик - проблем нет")
+
+    problems = check_health({"errors_count": str(ERROR_THRESHOLD)}, now)
+    check(bool(problems), f"много ошибок - замечаем: {problems}")
+
+    problems = check_health(
+        {"selfcheck_ok_at": str(now - SELFCHECK_MAX_AGE - 60)}, now
+    )
+    check(bool(problems), f"самопроверка давно не шла - замечаем: {problems}")
+
+    problems = check_health(
+        {"errors_count": "0", "selfcheck_ok_at": str(now - 60)}, now
+    )
+    check(not problems, f"всё хорошо - не замечаем: {problems}")
+
+
+async def test_error_counter() -> None:
+    """Счётчик ошибок в обработчиках."""
+    section("Счётчик ошибок")
+
+    db = Database(":memory:")
+    await db.connect()
+
+    count = await db.count_error(window_seconds=3600)
+    check(count == 1, f"первая ошибка: {count}")
+    count = await db.count_error(window_seconds=3600)
+    check(count == 2, f"вторая ошибка: {count}")
+    check(await db.get_meta("errors_count") == "2", "счётчик сохранён в базе")
+
+    # окно сбрасывается, когда проходит больше часа
+    await db.set_meta("errors_window_start", "0")
+    count = await db.count_error(window_seconds=3600)
+    check(count == 1, f"окно сбросилось: {count}")
+
+    await db.close()
+
 
 async def main() -> None:
     print("=" * 56)
@@ -552,6 +592,7 @@ async def main() -> None:
     await test_adaptive_and_notify()
     await test_backup()
     test_watchdog_logic()
+    await test_error_counter()
 
     print("\n" + "=" * 56)
     print(f"  Пройдено: {PASSED}   Провалено: {FAILED}")

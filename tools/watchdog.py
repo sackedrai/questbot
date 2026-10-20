@@ -50,6 +50,11 @@ MAX_RESTARTS = 3
 # Как часто можно слать алерт (секунды)
 ALERT_COOLDOWN = 6 * 3600
 
+# Сколько ошибок в обработчиках за час считать аварией
+ERROR_THRESHOLD = 5
+# Как давно должна проходить самопроверка (секунды)
+SELFCHECK_MAX_AGE = 4 * 3600
+
 
 def _env_float(name: str, default: float) -> float:
     try:
@@ -135,6 +140,46 @@ def _headers(token: str) -> dict[str, str]:
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
+
+
+def read_meta(db_path: Path) -> dict[str, str]:
+    """Прочитать метрики здоровья из базы."""
+    import sqlite3
+
+    if not db_path.exists():
+        return {}
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return {}
+    try:
+        rows = conn.execute("SELECT key, value FROM meta").fetchall()
+        return {key: value for key, value in rows}
+    except sqlite3.Error:
+        return {}
+    finally:
+        conn.close()
+
+
+def check_health(meta: dict[str, str], now: Optional[float] = None) -> list[str]:
+    """Проблемы со здоровьем, которые перезапуск не исправит.
+
+    Бот может быть жив (прогоны зелёные), но при этом сломанным:
+    обработчики падают или он не отвечает. Вот это здесь и ловится.
+    """
+    now = now if now is not None else time.time()
+    problems: list[str] = []
+
+    count = int(meta.get("errors_count", "0") or 0)
+    if count >= ERROR_THRESHOLD:
+        problems.append(f"ошибок в обработчиках за последний час: {count}")
+
+    last_selfcheck = float(meta.get("selfcheck_ok_at", "0") or 0)
+    if last_selfcheck and (now - last_selfcheck) > SELFCHECK_MAX_AGE:
+        hours = int((now - last_selfcheck) // 3600)
+        problems.append(f"самопроверка не проходила {hours} ч")
+
+    return problems
 
 
 def fetch_runs(token: str, repo: str, workflow: str = BOT_WORKFLOW) -> list[Run]:
@@ -265,7 +310,9 @@ def send_telegram(token: str, chat_id: str, text: str) -> bool:
         return False
 
 
-def build_alert(decision: Decision, state: State) -> str:
+def build_alert(
+    decision: Decision, state: State, health: Optional[list[str]] = None
+) -> str:
     """Текст уведомления."""
     when = time.strftime("%d.%m %H:%M", time.localtime())
     lines = [
@@ -274,6 +321,8 @@ def build_alert(decision: Decision, state: State) -> str:
         style.note(decision.reason),
         style.note(f"Попыток перезапуска подряд: {state.fails}"),
     ]
+    for problem in health or []:
+        lines.append(style.note(f"• {problem}"))
     if decision.last_good:
         stamp = time.strftime("%d.%m %H:%M", time.localtime(decision.last_good.created_at))
         lines.append(style.note(f"Последний успешный прогон: {stamp}"))
@@ -309,6 +358,29 @@ def main() -> int:
     state.last_check = time.time()
 
     print(f"  решение: {decision.action} ({decision.reason})")
+
+    # здоровье обработчиков: перезапуск это не чинит, нужно звать человека
+    meta = read_meta(Path(os.getenv("WATCHDOG_DB_PATH", "data/questbot.db")))
+    health = check_health(meta)
+    if health:
+        print(f"  проблемы со здоровьем: {'; '.join(health)}")
+
+    if decision.action == "none" and health:
+        # бот жив, но сломан - тревожим, перезапуск не поможет
+        if time.time() - state.last_alert > ALERT_COOLDOWN:
+            if bot_token:
+                sent = send_telegram(
+                    bot_token, admin, build_alert(decision, state, health)
+                )
+                print(
+                    f"  уведомление в Telegram: {'отправлено' if sent else 'НЕ отправлено'}"
+                )
+            state.last_alert = time.time()
+            state.save()
+            return 1
+        print("  недавно тревожили - молчу")
+        state.save()
+        return 1
 
     if "--test-alert" in sys.argv:
         text = "\n".join(

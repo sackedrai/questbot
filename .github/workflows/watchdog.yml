@@ -60,6 +60,14 @@ jobs:
           restore-keys: |
             watchdog-
 
+      - name: База для проверки здоровья
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: watchdog-db-${{ github.run_id }}
+          restore-keys: |
+            questbot-db-
+
       - name: Проверить бота
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -68,6 +76,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           WATCHDOG_STALE_HOURS: ${{ inputs.watchdog_stale_hours }}
           WATCHDOG_MAX_RESTARTS: ${{ inputs.watchdog_max_restarts }}
+          WATCHDOG_DB_PATH: data/questbot.db
         run: |
           if [ "${{ inputs.test_alert }}" = "true" ]; then
             python tools/watchdog.py --test-alert

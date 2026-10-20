@@ -140,10 +140,13 @@ async def main() -> None:
     import bot.daily as daily_module
     import bot.adaptive as adaptive_module
     import bot.pvp as pvp_module
+    import bot.selfcheck as selfcheck_module
+    import bot.middleware as middleware_module
 
     for module in (services_module, common_module, games_module,
                    profile_module, quests_module, ranking_module,
-                   daily_module, adaptive_module, pvp_module):
+                   daily_module, adaptive_module, pvp_module,
+                   selfcheck_module, middleware_module):
         module.db = db
 
     session = MockSession()
@@ -376,6 +379,16 @@ async def main() -> None:
     check(bool(sent), f"квест показан заново: {len(sent)} сообщений")
     check(any("Вопрос?" in (c.text or "") for c in sent),
           "это именно квест, а не заглушка")
+
+    # --- 13. самопроверка: фейковое сообщение через диспетчер ---
+    from bot.selfcheck import run_self_check
+
+    ok = await run_self_check(dp, bot)
+    check(ok, "самопроверка прошла")
+    stamp = await db.get_meta("selfcheck_ok_at", "0")
+    check(float(stamp) > 0, f"отметка самопроверки записана: {stamp}")
+    count = await db.get_meta("selfcheck_count", "0")
+    check(int(count) >= 1, f"счётчик самопроверок: {count}")
 
     await db.close()
 

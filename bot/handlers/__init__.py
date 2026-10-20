@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from aiogram import Router
 
-from . import common, games, profile, pvp, quests, ranking, settings
+from . import common, games, profile, pvp, quests, ranking, selfcheck, settings
 
 router = Router()
 router.include_router(games.router)
 router.include_router(pvp.router)
 router.include_router(settings.router)
+router.include_router(selfcheck.router)
 router.include_router(common.router)
 router.include_router(quests.router)
 router.include_router(profile.router)

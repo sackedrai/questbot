@@ -28,7 +28,9 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from .config import BOT_TOKEN
 from .db import db
 from .handlers import router as main_router
+from .middleware import ErrorCounterMiddleware
 from .net import build_session, detect_channel
+from .selfcheck import self_check_loop
 
 log = logging.getLogger(__name__)
 
@@ -195,6 +197,10 @@ async def main() -> None:
     )
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(main_router)
+    # считаем ошибки в обработчиках - по ним сторож поймёт,
+    # что бот жив, но сломан
+    dp.message.middleware(ErrorCounterMiddleware())
+    dp.callback_query.middleware(ErrorCounterMiddleware())
 
     log.info(
         "Параметры прогона: MAX_RUN_MINUTES=%s DISPATCH_NEXT=%s DROP_PENDING_UPDATES=%s",
@@ -221,13 +227,16 @@ async def main() -> None:
         # выдаём квесты тем, кому положено (и ждём, если срок скоро)
         max_run = float(os.getenv("MAX_RUN_MINUTES", "0") or 0)
         daily_task = asyncio.create_task(_daily_pass(bot, max_run))
+        # и проверяем сами себя: бот жив, но обработчики могли сломаться
+        check_task = asyncio.create_task(self_check_loop(dp, bot))
         try:
             # именно _run_polling: он останавливает поллинг по таймеру
             await _run_polling(dp, bot)
         finally:
-            daily_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await daily_task
+            for task in (daily_task, check_task):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
     finally:
         log.info("Завершаюсь: закрываю сессию")
         await bot.session.close()

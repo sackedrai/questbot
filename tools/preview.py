@@ -26,7 +26,7 @@ from bot.handlers.common import HELP_TEXT, WELCOME_TEXT  # noqa: E402
 from bot.services import build_profile_text, build_top_text  # noqa: E402
 
 
-def show(title: str, text: str) -> None:
+def show(title: str, text: str, markup=None) -> None:
     print("\n" + "═" * 58)
     print(f"  {title}")
     print("═" * 58)
@@ -34,6 +34,10 @@ def show(title: str, text: str) -> None:
               .replace("<i>", "").replace("</i>", "")
               .replace("<pre>", "").replace("</pre>", "")
               .replace("<blockquote>", "").replace("</blockquote>", ""))
+    if markup is not None and getattr(markup, "inline_keyboard", None):
+        print("  кнопки:")
+        for row in markup.inline_keyboard:
+            print("    [" + "] [".join(button.text for button in row) + "]")
 
 
 async def main() -> None:
@@ -123,7 +127,7 @@ async def _render(db: Database) -> None:
         quest = Quest(id=1, tg_id=1, day="2026-10-21", game_type=game_type,
                       difficulty="medium", payload=payload)
         render = game.render(quest)
-        show(f"КВЕСТ: {game_type.upper()}", render.text)
+        show(f"КВЕСТ: {game_type.upper()}", render.text, render.markup)
 
     # результат
     from bot.services import complete_quest

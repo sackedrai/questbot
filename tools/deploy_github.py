@@ -48,10 +48,18 @@ def find_gh() -> Path:
 
 GH = find_gh()
 
+# Команды, которые belong gh (остальные - git)
+GH_COMMANDS = {
+    "auth", "api", "repo", "secret", "workflow", "run", "variable",
+    "secret", "cache", "browse", "label", "release", "repo",
+}
+
 
 def run(args: list[str], *, capture: bool = False, stdin: str | None = None) -> str:
+    """Запустить gh или git - в зависимости от команды."""
+    executable = str(GH) if args and args[0] in GH_COMMANDS else "git"
     result = subprocess.run(
-        [str(GH), *args],
+        [executable, *args],
         cwd=BASE_DIR,
         capture_output=capture,
         text=True,
@@ -95,13 +103,22 @@ def main() -> int:
              "--description", "Ежедневные квесты с рейтингом друзей"])
 
     # 2. remote + push
-    run(["repo", "set-default", f"{account}/{repo}"])
-    remotes = run(["remote"], capture=True)
+    remotes = subprocess.run(
+        ["git", "remote"], cwd=BASE_DIR, capture_output=True, text=True
+    ).stdout
     if "origin" not in remotes:
         run(["remote", "add", "origin",
              f"https://github.com/{account}/{repo}.git"])
     print("  пушу код")
-    run(["push", "-u", "origin", "main"])
+    push = subprocess.run(
+        ["git", "push", "-u", "origin", "main"],
+        cwd=BASE_DIR, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    if push.returncode != 0:
+        print("  push не прошёл:\n ", (push.stderr or push.stdout)[:500])
+        return 1
+    print("  код запушен")
 
     # 3. секрет
     print("  кладу BOT_TOKEN в секреты репозитория")

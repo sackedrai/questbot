@@ -156,13 +156,28 @@ class Database:
         ) as cur:
             return await cur.fetchone()
 
-    async def create_user(self, tg_id: int, username: str, display_name: str) -> None:
+    async def create_user(self, tg_id: int) -> None:
+        """Завести игрока.
+
+        Username и display_name намеренно не храним: ник игрок задаёт сам
+        (он всегда есть), а @username Telegram присылает с каждым
+        сообщением. Хранить его в базе незачем, а бэкап базы публичный.
+        """
         await self.db.execute(
-            "INSERT OR IGNORE INTO users (tg_id, username, display_name, created_at)"
-            " VALUES (?, ?, ?, ?)",
-            (tg_id, username, display_name, time.time()),
+            "INSERT OR IGNORE INTO users (tg_id, created_at) VALUES (?, ?)",
+            (tg_id, time.time()),
         )
         await self.db.commit()
+
+    async def purge_personal_fields(self) -> int:
+        """Стереть @username и имя из базы (остаются только id и ник)."""
+        cur = await self.db.execute(
+            "UPDATE users SET username = '', display_name = ''"
+            " WHERE username != '' OR display_name != ''"
+        )
+        changed = cur.rowcount or 0
+        await self.db.commit()
+        return changed
 
     async def set_nickname(self, tg_id: int, nickname: str) -> None:
         await self.db.execute(

@@ -243,7 +243,7 @@ async def build_profile_text(tg_id: int) -> str:
     done = user["quests_done"]
     correct = user["correct"]
     accuracy = round(100 * correct / done) if done else 0
-    nickname = user["nickname"] or user["display_name"] or "Без имени"
+    nickname = user["nickname"] or "Без имени"
 
     day_summary = await db.daily_summary(tg_id, today_iso())
     today_points = day_summary["points"]
@@ -309,7 +309,7 @@ async def build_top_text(scope: str = "all", tg_id: Optional[int] = None) -> tup
 
     table_rows = []
     for row in rows:
-        name = row["nickname"] or row["display_name"] or row["username"] or "Аноним"
+        name = row["nickname"] or "Аноним"
         points = row["scope_points"] if scope != "all" else row["total_points"]
         table_rows.append((name, style.number(points)))
     parts.append(style.leaderboard(table_rows))

@@ -69,7 +69,7 @@ async def _render(db: Database) -> None:
             await db.finish_quest(quest_id, points, "done")
 
     # игрок с историей
-    await db.create_user(1, "vasya", "Вася")
+    await db.create_user(1)
     await db.set_nickname(1, "Вася")
     await db.set_difficulty(1, "medium")
     await db.add_result(1, 420, True)
@@ -83,17 +83,17 @@ async def _render(db: Database) -> None:
     await seed(1, 310)
     await seed(1, 240)
 
-    await db.create_user(2, "petya", "Петя")
+    await db.create_user(2)
     await db.set_nickname(2, "Петя")
     await db.add_result(2, 1180, True)
     await seed(2, 1180)
 
-    await db.create_user(3, "olya", "Оля")
+    await db.create_user(3)
     await db.set_nickname(3, "Оля")
     await db.add_result(3, 940, True)
     await seed(3, 940)
 
-    await db.create_user(4, "misha", "Миша")
+    await db.create_user(4)
     await db.set_nickname(4, "Миша")
     await db.add_result(4, 610, True)
     await seed(4, 610)

@@ -195,7 +195,7 @@ async def main() -> None:
           f"callback top:today обработан: {session.method_names()}")
 
     # --- 4. игровой callback ---
-    await db.create_user(555, "u", "U")
+    await db.create_user(555)
     quest_id = await db.create_quest(555, "2026-01-01", "quiz", "easy",
                                      {"q": "?", "options": ["a", "b", "c", "d"],
                                       "correct": 0, "cat": "t"})
@@ -219,7 +219,7 @@ async def main() -> None:
 
     fresh_user = User(id=556, is_bot=False, first_name="Другой")
     fresh_chat = Chat(id=556, type="private")
-    await db.create_user(556, "other", "Другой")
+    await db.create_user(556)
     msg_q = Message(message_id=10, date=datetime.now(timezone.utc),
                     chat=fresh_chat, from_user=fresh_user, text="/quest")
     await dp.feed_update(bot, Update(update_id=10, message=msg_q))
@@ -252,7 +252,7 @@ async def main() -> None:
               "после прохождения квест закрыт на 24 часа")
 
     # --- 6. отказ от квеста ---
-    await db.create_user(555, "u", "U")
+    await db.create_user(555)
     quest_id = await db.create_quest(555, "2026-10-21", "quiz", "easy",
                                      {"q": "?", "options": ["a", "b", "c", "d"],
                                       "correct": 0, "cat": "t"})
@@ -318,8 +318,8 @@ async def main() -> None:
           f"в рейтинге есть кнопка возврата: {labels}")
 
     # --- 11. PvP: вызов, принятие, одинаковый квест, победа ---
-    await db.create_user(600, "a", "A")
-    await db.create_user(601, "b", "B")
+    await db.create_user(600)
+    await db.create_user(601)
     user_a = User(id=600, is_bot=False, first_name="A")
     user_b = User(id=601, is_bot=False, first_name="B")
 
@@ -365,7 +365,7 @@ async def main() -> None:
         check(loser["pvp_losses"] == 1, f"поражение засчитано: {loser['pvp_losses']}")
 
     # --- 12. /quest при активном квесте показывает квест, а не заглушку ---
-    await db.create_user(700, "c", "C")
+    await db.create_user(700)
     user_c = User(id=700, is_bot=False, first_name="C")
     chat_c = Chat(id=700, type="private")
     await db.create_quest(700, "2026-10-21", "quiz", "easy",

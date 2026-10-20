@@ -234,9 +234,26 @@ async def test_database() -> None:
     db = Database(":memory:")
     await db.connect()
 
-    await db.create_user(1, "ivan", "Иван")
-    await db.create_user(2, "petr", "Пётр")
+    await db.create_user(1)
+    await db.create_user(2)
     check(await db.get_user(1) is not None, "пользователь создан")
+    # @username и имя не храним - бэкап базы публичный
+    raw = await db.get_user(1)
+    check((raw["username"] or "") == "" and (raw["display_name"] or "") == "",
+          "личные поля не сохраняются при создании")
+
+    # данные, оставшиеся от старых версий, вычищаются
+    await db.set_nickname(1, "Иван")
+    await db.db.execute(
+        "UPDATE users SET username = 'ivan', display_name = 'Иван' WHERE tg_id = 1"
+    )
+    await db.db.commit()
+    purged = await db.purge_personal_fields()
+    check(purged == 1, f"старые личные поля вычищены: {purged}")
+    row = await db.get_user(1)
+    check((row["username"] or "") == "" and (row["display_name"] or "") == "",
+          "после очистки личных полей не осталось")
+    check(row["nickname"] == "Иван", "ник при этом сохранился")
 
     await db.set_nickname(1, "Иван")
     await db.set_nickname(2, "Пётр")
@@ -339,7 +356,7 @@ async def test_daily_logic() -> None:
     db = Database(":memory:")
     await db.connect()
     daily.db = db
-    await db.create_user(1, "u", "U")
+    await db.create_user(1)
 
     avail = await daily.availability(1)
     check(avail.state == "due", f"первый квест доступен сразу: {avail.state}")
@@ -396,7 +413,7 @@ async def test_adaptive_and_notify() -> None:
     db = Database(":memory:")
     await db.connect()
     adaptive.db = db
-    await db.create_user(1, "u", "U")
+    await db.create_user(1)
 
     level = await adaptive.pick_difficulty(1, random.Random(1))
     check(level == "easy", f"новичку начинаем легко: {level}")
@@ -423,51 +440,90 @@ async def test_adaptive_and_notify() -> None:
 
 
 async def test_backup() -> None:
-    """Бэкап базы в git: коммит и восстановление."""
-    section("Бэкап в репозиторий")
+    """Бэкап базы в git: шифрование, коммит и восстановление."""
+    section("Бэкап в репозитории")
 
+    import os
     import subprocess
     import tempfile
 
+    from cryptography.fernet import Fernet
+
     from bot.backup import backup_database, restore_from_repo
 
-    with tempfile.TemporaryDirectory() as tmp:
-        repo = Path(tmp) / "work"
-        repo.mkdir()
-        bare = Path(tmp) / "origin.git"
-        subprocess.run(["git", "init", "--bare", "-q", str(bare)], check=True)
-        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-        subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
-        subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
-        subprocess.run(
-            ["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True
-        )
+    old_key = os.environ.get("BACKUP_KEY")
+    os.environ["BACKUP_KEY"] = Fernet.generate_key().decode("ascii")
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "work"
+            repo.mkdir()
+            bare = Path(tmp) / "origin.git"
+            subprocess.run(["git", "init", "--bare", "-q", str(bare)], check=True)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
+            subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True
+            )
 
-        db = repo / "data" / "questbot.db"
-        db.parent.mkdir(exist_ok=True)
-        db.write_bytes(b"first version")
+            db = repo / "data" / "questbot.db"
+            db.parent.mkdir(exist_ok=True)
+            db.write_bytes(b"first version")
 
-        status = await backup_database(repo, db, min_hours=0)
-        check("запушен" in status or "закоммичено" in status,
-              f"база закоммичена: {status}")
-        check((repo / "backup" / "questbot.db").exists(),
-              "копия появилась в backup/")
+            status = await backup_database(repo, db, min_hours=0)
+            check("запушен" in status or "закоммичено" in status,
+                  f"база закоммичена: {status}")
 
-        committed = subprocess.run(
-            ["git", "log", "--oneline"], cwd=repo, capture_output=True, text=True
-        ).stdout
-        check("backup:" in committed, f"коммит с бэкапом создан: {committed.strip()[:60]}")
+            enc = repo / "backup" / "questbot.db.enc"
+            check(enc.exists(), "зашифрованная копия появилась в backup/")
+            check(not (repo / "backup" / "questbot.db").exists(),
+                  "открытая копия базы не создаётся")
+            check(b"first version" not in enc.read_bytes(),
+                  "в файле бэкапа нет открытых данных")
 
-        # восстановление в чистую рабочую папку
-        db.unlink()
-        status = await restore_from_repo(repo, db)
-        check(db.exists(), f"база восстановлена из репозитория: {status}")
-        check(db.read_bytes() == b"first version", "содержимое совпадает")
+            # декодируем сами: text=True использует локаль системы,
+            # а git отдаёт UTF-8 с кириллицей (в cp1252 это падает)
+            committed = subprocess.run(
+                ["git", "log", "--oneline"], cwd=repo, capture_output=True
+            ).stdout.decode("utf-8", "replace")
+            check("backup:" in committed, f"коммит с бэкапом создан: {committed.strip()[:60]}")
 
-        # троттлинг: сразу после коммита повторный бэкап не делается
-        db.write_bytes(b"second version")
-        status = await backup_database(repo, db, min_hours=4)
-        check("пока не коммичу" in status, f"троттлинг работает: {status}")
+            shown = subprocess.run(
+                ["git", "show", "HEAD:backup/questbot.db.enc"],
+                cwd=repo, capture_output=True,
+            ).stdout
+            check(b"first version" not in shown,
+                  "в истории git нет открытой базы")
+
+            # восстановление в чистую рабочую папку
+            db.unlink()
+            status = await restore_from_repo(repo, db)
+            check(db.exists(), f"база восстановлена из репозитория: {status}")
+            check(db.read_bytes() == b"first version", "содержимое совпадает")
+
+            # троттлинг: сразу после коммита повторный бэкап не делается
+            db.write_bytes(b"second version")
+            status = await backup_database(repo, db, min_hours=4)
+            check("пока не коммичу" in status, f"троттлинг работает: {status}")
+
+            # неверный ключ - восстановление не должно ломать бота
+            os.environ["BACKUP_KEY"] = Fernet.generate_key().decode("ascii")
+            db.unlink()
+            status = await restore_from_repo(repo, db)
+            check("не удалось расшифровать" in status,
+                  f"чужим ключом база не открывается: {status}")
+            check(not db.exists(), "при неверном ключе база не создаётся")
+
+            # без ключа бэкап делаться не должен - данные не утекают
+            os.environ.pop("BACKUP_KEY", None)
+            db.write_bytes(b"third version")
+            status = await backup_database(repo, db, min_hours=0)
+            check("BACKUP_KEY" in status, f"без ключа бэкап пропущен: {status}")
+    finally:
+        if old_key is None:
+            os.environ.pop("BACKUP_KEY", None)
+        else:
+            os.environ["BACKUP_KEY"] = old_key
 
 
 def test_watchdog_logic() -> None:

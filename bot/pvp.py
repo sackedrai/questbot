@@ -66,7 +66,7 @@ async def player_name(tg_id: int) -> str:
     user = await db.get_user(tg_id)
     if user is None:
         return "Игрок"
-    return user["nickname"] or user["display_name"] or "Игрок"
+    return user["nickname"] or "Игрок"
 
 
 async def opponent_of(match, tg_id: int) -> int:

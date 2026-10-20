@@ -53,14 +53,6 @@ jobs:
           restore-keys: |
             questbot-db-
 
-      - name: Бэкап из репозитория
-        run: |
-          mkdir -p data
-          if [ ! -s data/questbot.db ] && [ -s backup/questbot.db ]; then
-            cp backup/questbot.db data/questbot.db
-            echo "::notice::База восстановлена из репозитория (кэш был пуст)"
-          fi
-
       - name: Зависимости
         run: |
           python -m pip install --upgrade pip
@@ -72,6 +64,9 @@ jobs:
         timeout-minutes: 150
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          # Ключ шифрования бэкапа базы. Без него бот не будет коммитить
+          # базу в репозиторий (данные не должны утекать в открытый git).
+          BACKUP_KEY: ${{ secrets.BACKUP_KEY }}
           DB_PATH: data/questbot.db
           MAX_RUN_MINUTES: ${{ inputs.minutes || '115' }}
           DROP_PENDING_UPDATES: '0'

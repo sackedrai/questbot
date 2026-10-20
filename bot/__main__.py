@@ -18,6 +18,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -25,7 +26,8 @@ from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from .config import BOT_TOKEN
+from .backup import restore_from_repo
+from .config import BOT_TOKEN, DB_PATH
 from .db import db
 from .handlers import router as main_router
 from .middleware import ErrorCounterMiddleware
@@ -209,8 +211,19 @@ async def main() -> None:
         os.getenv("DROP_PENDING_UPDATES"),
     )
 
+    # если кэш Actions потерялся - берём базу из репозитория (зашифрованную)
+    try:
+        restore_status = await restore_from_repo(Path.cwd(), Path(DB_PATH).resolve())
+        log.info("Восстановление базы: %s", restore_status)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Не удалось проверить бэкап в репозитории: %r", exc)
+
     await db.connect()
     log.info("База данных подключена: %s", db.path)
+    purged = await db.purge_personal_fields()
+    if purged:
+        log.info("Очищено личных полей из базы: %s записей", purged)
+
     try:
         drop_pending = os.getenv("DROP_PENDING_UPDATES", "1") not in ("0", "false", "no")
         try:
@@ -251,7 +264,7 @@ async def main() -> None:
 
 
 async def _backup_database() -> None:
-    """Закоммитить базу в репозиторий - страховка от потери кэша."""
+    """Закоммитить базу в репозиторий (зашифрованной) - страховка от потери кэша."""
     from pathlib import Path
 
     from .backup import backup_database

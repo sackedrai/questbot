@@ -3,7 +3,8 @@ data/
 *.db
 *.db-wal
 *.db-shm
-!backup/questbot.db
+# бэкап базы в репозитории лежит зашифрованным (.db.enc), обычный *.db игнорируем
+!backup/questbot.db.enc
 __pycache__/
 *.py[cod]
 .venv/

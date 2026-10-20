@@ -1,32 +1,72 @@
 """Бэкап базы в git-репозиторий.
 
-Кэш GitHub Actions ненадёжен: записи вытесняются, кэш привязан к
-репозиторию и ветке, и его не видно в git. Поэтому база дополнительно
-коммитится в репозиторий - обычный git даёт надёжную историю и
-возможность отката на любой коммит.
+Кэш GitHub Actions - ненадёжное хранилище: записи вытесняются, кэш
+привязан к репозиторию и ветке, и его не видно в git. Поэтому база
+дополнительно коммитится в репозиторий - обычный git даёт надёжную
+историю и возможность отката на любой коммит.
+
+Репозиторий публичный (иначе не хватит бесплатных минут Actions), а
+значит копия базы видна всем. Поэтому она **шифруется** ключом из
+секретов репозитория (BACKUP_KEY): в репозитории лежит только
+шифротекст, а рабочая копия в кэше остаётся обычной.
 
 Как это работает:
 
 * рабочая копия - ``data/questbot.db`` (восстанавливается из кэша);
-* бэкап - ``backup/questbot.db`` (лежит в git, коммитится автоматически);
-* восстановление при потере кэша происходит само: шаг checkout кладёт
-  последнюю закоммиченную копию, шаг в workflow подставляет её, если
-  кэш оказался пустым.
-
-Коммит делается не чаще, чем раз в ``min_hours`` часов - иначе история
-репозитория распухает бинарными правками.
+* бэкап - ``backup/questbot.db.enc`` (шифротекст в git);
+* восстановление при потере кэша происходит само: бот на старте видит, что
+  рабочей базы нет, и расшифровывает бэкап из репозитория.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 BACKUP_DIR = "backup"
-BACKUP_NAME = "questbot.db"
+BACKUP_NAME = "questbot.db.enc"
+PLAIN_NAME = "questbot.db"
+
+# Как часто коммитить бэкап (часов)
+BACKUP_INTERVAL_HOURS = 4.0
+
+
+class BackupError(RuntimeError):
+    """Не удалось сделать бэкап."""
+
+
+def get_key() -> Optional[bytes]:
+    """Ключ шифрования из секретов репозитория."""
+    raw = os.getenv("BACKUP_KEY", "").strip()
+    if not raw:
+        return None
+    return raw.encode("utf-8")
+
+
+def _fernet(key: bytes):
+    from cryptography.fernet import Fernet
+
+    return Fernet(key)
+
+
+def encrypt_file(source: Path, target: Path, key: bytes) -> None:
+    """Зашифровать файл."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    token = _fernet(key).encrypt(source.read_bytes())
+    target.write_bytes(token)
+
+
+def decrypt_file(source: Path, target: Path, key: bytes) -> None:
+    """Расшифровать файл."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    plain = _fernet(key).decrypt(source.read_bytes())
+    target.write_bytes(plain)
 
 
 async def _git(*args: str, cwd: Path, timeout: float = 60.0) -> tuple[int, str]:
@@ -56,48 +96,12 @@ async def _git(*args: str, cwd: Path, timeout: float = 60.0) -> tuple[int, str]:
     return proc.returncode or 0, out.decode("utf-8", "replace")
 
 
-def _file_hash(path: Path) -> str:
-    """Хеш файла - чтобы понять, менялась ли база.
-
-    Через git status не проверить: рабочая база лежит в data/, а эта
-    папка в .gitignore, и git её не отслеживает.
-    """
-    import hashlib
-
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _has_players(path: Path) -> bool:
-    """Есть ли в базе игроки.
-
-    Нужна защита: если бот поднялся с пустой базой, коммит не должен
-    затереть хорошую копию в репозитории.
-    """
-    import sqlite3
-
-    try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    except sqlite3.Error:
-        return True  # не SQLite - не наша забота
-    try:
-        row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
-        return bool(row and row[0])
-    except sqlite3.Error:
-        return True
-    finally:
-        conn.close()
-
-
 async def backup_database(
     repo_dir: Path,
     db_path: Path,
-    min_hours: float = 4.0,
+    min_hours: float = BACKUP_INTERVAL_HOURS,
 ) -> str:
-    """Закоммитить базу в репозиторий, если она изменилась.
+    """Зашифровать базу и закоммитить её в репозиторий.
 
     Возвращает короткий статус: что именно произошло.
     """
@@ -109,12 +113,12 @@ async def backup_database(
     except ValueError:
         return "база вне репозитория - пропускаю"
 
-    if not _has_players(db_path):
-        return "в базе нет игроков - бэкап не делаю"
+    key = get_key()
+    if key is None:
+        return "нет ключа BACKUP_KEY - бэкап пропущен (данные публикуем не буду)"
 
-    backup_file = repo_dir / BACKUP_DIR / BACKUP_NAME
-    if backup_file.exists() and _file_hash(backup_file) == _file_hash(db_path):
-        return "база не менялась"
+    backup_dir = repo_dir / BACKUP_DIR
+    backup_file = backup_dir / BACKUP_NAME
 
     # троттлинг: не чаще, чем раз в min_hours
     code, out = await _git(
@@ -126,18 +130,21 @@ async def backup_database(
         minutes = int((time.time() - last) // 60)
         return f"бэкап был {minutes} мин назад - пока не коммичу"
 
-    # копия в отслеживаемую папку
-    backup_dir = repo_dir / BACKUP_DIR
-    backup_dir.mkdir(exist_ok=True)
-    shutil.copy2(db_path, backup_file)
+    # шифруем
+    try:
+        encrypt_file(db_path, backup_file, key)
+    except Exception as exc:  # noqa: BLE001
+        return f"не удалось зашифровать: {exc!r}"
 
     await _git("add", "--", f"{BACKUP_DIR}/{BACKUP_NAME}", cwd=repo_dir)
     # на раннере автора может не быть - задаём явно
-    await _git("config", "user.email", "questbot@users.noreply.github.com", cwd=repo_dir)
+    await _git(
+        "config", "user.email", "questbot@users.noreply.github.com", cwd=repo_dir
+    )
     await _git("config", "user.name", "QuestBot", cwd=repo_dir)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     code, out = await _git(
-        "commit", "-m", f"backup: база игроков на {stamp}", cwd=repo_dir
+        "commit", "-m", f"backup: зашифрованная база игроков на {stamp}", cwd=repo_dir
     )
     if code != 0:
         if "nothing to commit" in out.lower():
@@ -150,13 +157,22 @@ async def backup_database(
     return "бэкап запушен в репозиторий"
 
 
-async def restore_from_repo(repo_dir: Path, db_path: Path) -> str:
-    """Положить базу из репозитория, если рабочей копии нет."""
-    backup = repo_dir / BACKUP_DIR / BACKUP_NAME
-    if not backup.exists():
+async def restore_from_repo(
+    repo_dir: Path, db_path: Path
+) -> str:
+    """Расшифровать бэкап из репозитория, если рабочей базы нет."""
+    backup_file = repo_dir / BACKUP_DIR / BACKUP_NAME
+    if not backup_file.exists():
         return "бэкапа в репозитории нет"
     if db_path.exists() and db_path.stat().st_size > 0:
         return "рабочая база на месте - не трогаю"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(backup, db_path)
+
+    key = get_key()
+    if key is None:
+        return "нет ключа BACKUP_KEY - восстановить нечем"
+
+    try:
+        decrypt_file(backup_file, db_path, key)
+    except Exception as exc:  # noqa: BLE001
+        return f"не удалось расшифровать: {exc!r}"
     return "база восстановлена из репозитория"

@@ -100,22 +100,14 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot) -> None:
         code = text.split("pvp_", 1)[1].split()[0].strip().upper()
         user = await db.get_user(tg_id)
         if user is None:
-            await db.create_user(
-                tg_id,
-                message.from_user.username or "",
-                message.from_user.full_name or "",
-            )
+            await db.create_user(tg_id)
             await db.set_nickname(tg_id, (message.from_user.full_name or "Игрок")[:20])
         await accept_flow(message, bot, code)
         return
 
     user = await db.get_user(tg_id)
     if user is None:
-        await db.create_user(
-            tg_id,
-            message.from_user.username or "",
-            message.from_user.full_name or "",
-        )
+        await db.create_user(tg_id)
         user = await db.get_user(tg_id)
 
     if not user["nickname"]:

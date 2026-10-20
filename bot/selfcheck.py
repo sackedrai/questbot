@@ -68,11 +68,11 @@ async def run_self_check(dp: Dispatcher, bot: Bot, chat_id: int = 0) -> bool:
 
 
 async def self_check_loop(dp: Dispatcher, bot: Bot, chat_id: int = 0) -> None:
-    """Проверять себя каждые SELFCHECK_INTERVAL секунд."""
+    """Проверять себя: сразу при старте и потом каждые SELFCHECK_INTERVAL секунд."""
     while True:
-        await asyncio.sleep(SELFCHECK_INTERVAL)
         try:
             ok = await run_self_check(dp, bot, chat_id)
             log.info("Самопроверка: %s", "ок" if ok else "провалена")
         except Exception as exc:  # noqa: BLE001
             log.warning("Самопроверка упала: %r", exc)
+        await asyncio.sleep(SELFCHECK_INTERVAL)

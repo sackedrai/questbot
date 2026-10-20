@@ -187,7 +187,22 @@ async def main() -> None:
         await bot.session.close()
         await db.close()
 
+    await _backup_database()
     _dispatch_next_run()
+
+
+async def _backup_database() -> None:
+    """Закоммитить базу в репозиторий - страховка от потери кэша."""
+    from pathlib import Path
+
+    from .backup import backup_database
+    from .config import DB_PATH
+
+    try:
+        status = await backup_database(Path.cwd(), Path(DB_PATH).resolve())
+        log.info("Бэкап базы: %s", status)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Бэкап базы не удался: %r", exc)
 
 
 async def _daily_pass(bot: Bot, max_run_minutes: float) -> None:

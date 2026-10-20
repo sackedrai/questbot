@@ -3,6 +3,7 @@ data/
 *.db
 *.db-wal
 *.db-shm
+!backup/questbot.db
 __pycache__/
 *.py[cod]
 .venv/

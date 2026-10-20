@@ -422,6 +422,54 @@ async def test_adaptive_and_notify() -> None:
     await db.close()
 
 
+async def test_backup() -> None:
+    """Бэкап базы в git: коммит и восстановление."""
+    section("Бэкап в репозиторий")
+
+    import subprocess
+    import tempfile
+
+    from bot.backup import backup_database, restore_from_repo
+
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp) / "work"
+        repo.mkdir()
+        bare = Path(tmp) / "origin.git"
+        subprocess.run(["git", "init", "--bare", "-q", str(bare)], check=True)
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", str(bare)], cwd=repo, check=True
+        )
+
+        db = repo / "data" / "questbot.db"
+        db.parent.mkdir(exist_ok=True)
+        db.write_bytes(b"first version")
+
+        status = await backup_database(repo, db, min_hours=0)
+        check("запушен" in status or "закоммичено" in status,
+              f"база закоммичена: {status}")
+        check((repo / "backup" / "questbot.db").exists(),
+              "копия появилась в backup/")
+
+        committed = subprocess.run(
+            ["git", "log", "--oneline"], cwd=repo, capture_output=True, text=True
+        ).stdout
+        check("backup:" in committed, f"коммит с бэкапом создан: {committed.strip()[:60]}")
+
+        # восстановление в чистую рабочую папку
+        db.unlink()
+        status = await restore_from_repo(repo, db)
+        check(db.exists(), f"база восстановлена из репозитория: {status}")
+        check(db.read_bytes() == b"first version", "содержимое совпадает")
+
+        # троттлинг: сразу после коммита повторный бэкап не делается
+        db.write_bytes(b"second version")
+        status = await backup_database(repo, db, min_hours=4)
+        check("пока не коммичу" in status, f"троттлинг работает: {status}")
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -433,6 +481,7 @@ async def main() -> None:
     await test_tracking_session()
     await test_daily_logic()
     await test_adaptive_and_notify()
+    await test_backup()
 
     print("\n" + "=" * 56)
     print(f"  Пройдено: {PASSED}   Провалено: {FAILED}")

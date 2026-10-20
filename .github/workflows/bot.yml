@@ -18,7 +18,7 @@ on:
     - cron: '23 */2 * * *'
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 concurrency:
@@ -47,6 +47,14 @@ jobs:
           key: questbot-db-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             questbot-db-
+
+      - name: Бэкап из репозитория
+        run: |
+          mkdir -p data
+          if [ ! -s data/questbot.db ] && [ -s backup/questbot.db ]; then
+            cp backup/questbot.db data/questbot.db
+            echo "::notice::База восстановлена из репозитория (кэш был пуст)"
+          fi
 
       - name: Зависимости
         run: |

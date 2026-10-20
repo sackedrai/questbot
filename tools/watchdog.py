@@ -33,11 +33,13 @@ for stream in (sys.stdout, sys.stderr):
         pass
 
 from bot import style  # noqa: E402
+from tools._repo import current_repo  # noqa: E402
 
 GITHUB_API = "https://api.github.com"
 TELEGRAM_API = "https://api.telegram.org"
 
-DEFAULT_REPO = "sackedrai/questbot"
+# имя репозитория не зашиваем: см. tools/_repo.py
+DEFAULT_REPO = current_repo()
 BOT_WORKFLOW = "bot.yml"
 
 STATE_DIR = Path(".watchdog")

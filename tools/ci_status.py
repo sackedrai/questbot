@@ -21,7 +21,9 @@ for stream in (sys.stdout, sys.stderr):
     except (AttributeError, ValueError):  # pragma: no cover
         pass
 
-REPO = "sackedrai/questbot"
+from tools._repo import current_repo  # noqa: E402
+
+REPO = current_repo()
 
 
 def find_gh() -> str:

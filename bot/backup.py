@@ -108,10 +108,14 @@ async def backup_database(
     if not db_path.exists():
         return "базы нет - пропускаю"
 
+    # путь базы должен быть внутри репозитория. Проверка мягкая: на раннере
+    # Path.cwd() и Path.resolve() иногда расходятся (симлинки), а шифротекст
+    # всё равно кладётся в repo_dir/backup - терять бэкап из-за этого нельзя.
     try:
-        rel_db = db_path.relative_to(repo_dir)
+        db_path.relative_to(repo_dir)
     except ValueError:
-        return "база вне репозитория - пропускаю"
+        if not str(db_path).startswith(str(repo_dir)):
+            return "база вне репозитория - пропускаю"
 
     key = get_key()
     if key is None:

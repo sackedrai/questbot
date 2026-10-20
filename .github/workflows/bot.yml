@@ -1,0 +1,73 @@
+# QuestBot в GitHub Actions.
+#
+# Файл назван bot.yml намеренно: имя файла используется в GITHUB_WORKFLOW
+# для автозапуска следующего прогона.
+#
+# Как это работает:
+#   1) Крон запускает workflow каждые 2 часа.
+#   2) Бот работает MAX_RUN_MINUTES минут и сам запускает следующий прогон.
+#   3) База SQLite хранится в кэше Actions и переживает перезапуски.
+#
+# Важно: у публичных репозиториев минуты Actions бесплатны. У приватных
+# лимит 2000 минут в месяц - тогда уменьши MAX_RUN_MINUTES и частоту крона.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Страховка, если автозапуск следующего прогона не сработал
+    - cron: '23 */2 * * *'
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: questbot
+  cancel-in-progress: false
+
+jobs:
+  bot:
+    name: Квест-бот
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Код
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Восстановить базу из кэша
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: questbot-db-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            questbot-db-
+
+      - name: Зависимости
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Запустить бота
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          DB_PATH: data/questbot.db
+          MAX_RUN_MINUTES: '115'
+          DROP_PENDING_UPDATES: '0'
+          # Самозапуск следующего прогона - только для публичных репозиториев,
+          # иначе минуты Actions не уложатся в бесплатный лимит
+          DISPATCH_NEXT: ${{ github.event.repository.private == false && '1' || '0' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python -m bot
+
+      - name: Сохранить базу в кэш
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: questbot-db-${{ github.run_id }}-${{ github.run_attempt }}

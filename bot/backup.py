@@ -29,19 +29,30 @@ BACKUP_DIR = "backup"
 BACKUP_NAME = "questbot.db"
 
 
-async def _git(*args: str, cwd: Path) -> tuple[int, str]:
-    """Выполнить git-команду и вернуть (код, вывод)."""
+async def _git(*args: str, cwd: Path, timeout: float = 60.0) -> tuple[int, str]:
+    """Выполнить git-команду и вернуть (код, вывод).
+
+    stdin закрываем: git не должен ждать ввода учётных данных - на
+    раннере это привело бы к зависанию прогона.
+    """
     try:
         proc = await asyncio.create_subprocess_exec(
             "git",
             *args,
             cwd=str(cwd),
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
     except FileNotFoundError:
         return 1, "git не найден"
-    out, _ = await proc.communicate()
+
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return 1, f"git {' '.join(args[:1])} завис - прервал"
     return proc.returncode or 0, out.decode("utf-8", "replace")
 
 

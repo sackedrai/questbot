@@ -32,8 +32,7 @@ async def _give_quest(
     # чистим прошлые сообщения бота, чтобы чат не засорялся
     await cleanup_chat(bot, message.chat.id, db)
 
-    sent = await message.answer(result.text, reply_markup=result.markup)
-    await db.track_message(message.chat.id, sent.message_id, "quest")
+    await message.answer(result.text, reply_markup=result.markup)
 
 
 @router.message(Command("quest"))

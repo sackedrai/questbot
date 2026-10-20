@@ -283,6 +283,44 @@ async def test_database() -> None:
     await db.close()
 
 
+async def test_tracking_session() -> None:
+    """Сессия должна запоминать каждое отправленное сообщение."""
+    section("Трекинг сообщений")
+
+    from datetime import datetime, timezone
+
+    import aiogram.client.session.aiohttp as aiohttp_session
+    from aiogram.methods import SendMessage
+    from aiogram.types import Chat, Message as TelegramMessage
+
+    from bot.net import TrackingSession
+    from bot import net as net_module
+
+    db = net_module.db
+    await db.connect()
+    await db.create_user(1, "u", "U")
+
+    original = aiohttp_session.AiohttpSession.make_request
+
+    async def fake_request(self, bot, method, timeout=None):
+        return TelegramMessage(
+            message_id=777,
+            date=datetime.now(timezone.utc),
+            chat=Chat(id=555, type="private"),
+        )
+
+    aiohttp_session.AiohttpSession.make_request = fake_request
+    try:
+        session = TrackingSession()
+        await session.make_request(None, SendMessage(chat_id=555, text="привет"))
+    finally:
+        aiohttp_session.AiohttpSession.make_request = original
+
+    tracked = await db.chat_messages(555)
+    check(777 in tracked, f"сообщение отслежено: {tracked}")
+    await db.close()
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -291,6 +329,7 @@ async def main() -> None:
     test_scoring()
     await test_games()
     await test_database()
+    await test_tracking_session()
 
     print("\n" + "=" * 56)
     print(f"  Пройдено: {PASSED}   Провалено: {FAILED}")

@@ -27,9 +27,12 @@ from typing import Any, Optional
 import aiohttp
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.client.telegram import TelegramAPIServer
+from aiogram.methods import SendMessage
+from aiogram.types import Message
 from aiohttp import ClientSession, ClientTimeout, TCPConnector
 
 from .config import API_BASE_URL, PROXY_URL, TGWS_HOST, TGWS_PORT
+from .db import db
 
 DEFAULT_BASE = "https://api.telegram.org"
 PROBE_TIMEOUT = 8.0
@@ -85,6 +88,23 @@ class ProbeResult:
     reachable: bool
     token_ok: bool
     detail: str
+
+
+class TrackingSession(AiohttpSession):
+    """Сессия, которая запоминает все сообщения бота.
+
+    Так чистка чата работает для любых сообщений - не только тех, где
+    хендлер сам вызвал track_message.
+    """
+
+    async def make_request(self, bot, method, timeout=None):
+        response = await super().make_request(bot, method, timeout=timeout)
+        if isinstance(method, SendMessage) and isinstance(response, Message):
+            try:
+                await db.track_message(response.chat.id, response.message_id, "auto")
+            except Exception:  # noqa: BLE001 - трекинг не должен ломать бота
+                pass
+        return response
 
 
 def _tgws_config_paths() -> list[Path]:
@@ -152,14 +172,14 @@ def build_session(channel: Channel) -> AiohttpSession:
     """Собрать сессию aiogram под выбранный канал."""
     if channel.mode == "custom":
         api = TelegramAPIServer.from_base(channel.base.rstrip("/"))
-        return AiohttpSession(api=api)
+        return TrackingSession(api=api)
     if channel.mode == "proxy":
-        return AiohttpSession(proxy=channel.proxy)
+        return TrackingSession(proxy=channel.proxy)
     if channel.mode == "tunnel":
-        session = AiohttpSession()
+        session = TrackingSession()
         session._connector_init["resolver"] = channel.resolver
         return session
-    return AiohttpSession()
+    return TrackingSession()
 
 
 def candidate_channels() -> list[Channel]:

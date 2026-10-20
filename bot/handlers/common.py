@@ -79,11 +79,10 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot) -> None:
 
     if not user["nickname"]:
         await state.set_state(Onboarding.nickname)
-        sent = await message.answer(WELCOME_TEXT)
-        await db.track_message(message.chat.id, sent.message_id, "info")
+        await message.answer(WELCOME_TEXT)
         return
 
-    sent = await message.answer(
+    await message.answer(
         "\n".join(
             [
                 style.header("👋", "С ВОЗВРАЩЕНИЕМ", f"{user['nickname']}!"),
@@ -92,7 +91,6 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot) -> None:
         ),
         reply_markup=main_menu(),
     )
-    await db.track_message(message.chat.id, sent.message_id, "menu")
 
 
 @router.message(Onboarding.nickname, F.text)
@@ -119,7 +117,7 @@ async def on_nickname(message: Message, state: FSMContext, bot: Bot) -> None:
         ),
         reply_markup=difficulty_menu(),
     )
-    await db.track_message(message.chat.id, sent.message_id, "info")
+    return sent
 
 
 @router.callback_query(F.data.startswith("diff:"))

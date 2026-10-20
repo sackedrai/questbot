@@ -154,6 +154,35 @@ async def main() -> None:
     qrow = await db.get_quest(quest_id)
     check(qrow["status"] == "done", f"квест закрыт со статусом done: {qrow['status']}")
 
+    # --- 5. полный цикл текстовой игры через диспетчер ---
+    # /quest -> бот выдаёт загадку и ставит состояние -> игрок пишет ответ
+    import bot.services as services_module
+
+    services_module.GAME_TYPES = ("riddle",)
+    session.calls.clear()
+
+    msg_q = Message(message_id=10, date=datetime.now(timezone.utc),
+                    chat=chat, from_user=user, text="/quest")
+    await dp.feed_update(bot, Update(update_id=10, message=msg_q))
+    check("SendMessage" in session.method_names(),
+          f"/quest отработал через диспетчер: {session.method_names()}")
+
+    active = await db.get_active_quest(555)
+    check(active is not None, "загадка выдана и сохранена в базе")
+    if active is not None:
+        import json
+
+        payload = json.loads(active["payload"])
+        session.calls.clear()
+        msg_a = Message(message_id=11, date=datetime.now(timezone.utc),
+                        chat=chat, from_user=user, text=payload["answers"][0])
+        await dp.feed_update(bot, Update(update_id=11, message=msg_a))
+        qrow = await db.get_quest(active["id"])
+        check(qrow["status"] == "done",
+              f"текстовый ответ засчитан: {qrow['status']}")
+        check("SendMessage" in session.method_names(),
+              f"бот ответил на ответ: {session.method_names()}")
+
     await db.close()
 
     print("\n" + "=" * 60)

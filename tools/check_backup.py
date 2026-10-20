@@ -44,9 +44,23 @@ def main() -> int:
         print("  бэкапа в репозитории нет")
         print("  ", result.stdout.decode("utf-8", "replace")[:200])
         return 1
-    for item in json.loads(result.stdout.decode("utf-8", "replace")):
+
+    items = json.loads(result.stdout.decode("utf-8", "replace"))
+    for item in items:
         print(f"  {item['name']}  {item['size']} байт  sha={item['sha'][:8]}")
-    return 0
+
+    names = {item["name"] for item in items}
+    problems = []
+    if "questbot.db" in names:
+        problems.append(
+            "в репозитории лежит открытая база (questbot.db) - так быть не должно"
+        )
+    if "questbot.db.enc" not in names:
+        problems.append("нет зашифрованного бэкапа (questbot.db.enc)")
+
+    for problem in problems:
+        print(f"  ВНИМАНИЕ: {problem}")
+    return 1 if problems else 0
 
 
 if __name__ == "__main__":

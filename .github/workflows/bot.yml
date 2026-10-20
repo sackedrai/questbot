@@ -13,6 +13,11 @@
 
 on:
   workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Сколько минут работать боту (по умолчанию 115)"
+        required: false
+        default: "115"
   schedule:
     # Страховка, если автозапуск следующего прогона не сработал
     - cron: '23 */2 * * *'
@@ -65,7 +70,7 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           DB_PATH: data/questbot.db
-          MAX_RUN_MINUTES: '115'
+          MAX_RUN_MINUTES: ${{ inputs.minutes || '115' }}
           DROP_PENDING_UPDATES: '0'
           # Самозапуск следующего прогона. Ставь 0, если репозиторий приватный:
           # тогда минуты Actions не уложатся в бесплатный лимит 2000/мес.

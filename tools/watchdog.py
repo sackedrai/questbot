@@ -185,6 +185,15 @@ def evaluate(
     good = [run for run in runs if run.ok and run.created_at]
     last_good = max(good, key=lambda run: run.created_at) if good else None
 
+    # идущий прогон - тоже признак того, что бот жив
+    running = [
+        run
+        for run in runs
+        if run.status == "in_progress"
+        and run.created_at
+        and (now - run.created_at) < stale_hours * 3600
+    ]
+
     if last_good is not None:
         age_hours = (now - last_good.created_at) / 3600
         if age_hours <= stale_hours:
@@ -196,6 +205,13 @@ def evaluate(
         reason = f"последний успешный прогон был {age_hours:.1f} ч назад"
     else:
         reason = "нет ни одного успешного прогона"
+
+    if running:
+        return Decision(
+            action="none",
+            reason="прогон бота сейчас идёт",
+            last_good=last_good,
+        )
 
     if state.fails < max_restarts:
         return Decision(action="restart", reason=reason, last_good=last_good)

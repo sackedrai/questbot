@@ -518,6 +518,15 @@ def test_watchdog_logic() -> None:
     check(decision.action == "alert" and not decision.should_alert,
           "недавно тревожили - молчим")
 
+    # идущий прогон - бот жив, даже если последний успешный был давно
+    running = Run(
+        id=4, status="in_progress", conclusion="",
+        created_at=now - 300, event="workflow_dispatch"
+    )
+    decision = evaluate([running], State(), now=now)
+    check(decision.action == "none",
+          f"идущий прогон считаем живым: {decision.action}")
+
     check(STALE_HOURS > 2.0,
           f"порог 'бот мёртв' больше длительности круга: {STALE_HOURS} ч")
 

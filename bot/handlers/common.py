@@ -81,7 +81,7 @@ async def on_nickname(message: Message, state: FSMContext) -> None:
     )
 
 
-@router.callback_query(F.callback_data.startswith("diff:"))
+@router.callback_query(F.data.startswith("diff:"))
 async def on_difficulty(callback: CallbackQuery, state: FSMContext) -> None:
     difficulty = callback.data.split(":", 1)[1]
     if difficulty not in DIFFICULTY_TITLES:
@@ -109,7 +109,7 @@ async def cmd_help(message: Message) -> None:
     await message.answer(HELP_TEXT, reply_markup=main_menu())
 
 
-@router.callback_query(F.callback_data.startswith("menu:"))
+@router.callback_query(F.data.startswith("menu:"))
 async def on_menu(callback: CallbackQuery, state: FSMContext) -> None:
     action = callback.data.split(":", 1)[1]
     tg_id = callback.from_user.id

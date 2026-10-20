@@ -16,7 +16,7 @@ from ..utils import safe_edit
 router = Router()
 
 
-@router.callback_query(F.callback_data.startswith("g:"))
+@router.callback_query(F.data.startswith("g:"))
 async def on_game_callback(callback: CallbackQuery, state: FSMContext) -> None:
     parts = callback.data.split(":")
     if len(parts) != 3:

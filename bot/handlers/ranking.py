@@ -19,7 +19,7 @@ async def cmd_top(message: Message) -> None:
     await message.answer(text, reply_markup=top_menu(scope))
 
 
-@router.callback_query(F.callback_data.startswith("top:"))
+@router.callback_query(F.data.startswith("top:"))
 async def on_top_scope(callback: CallbackQuery) -> None:
     scope = callback.data.split(":", 1)[1]
     text, scope = await build_top_text(scope, callback.from_user.id)

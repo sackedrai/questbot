@@ -107,13 +107,17 @@ class Database:
 
     async def set_nickname(self, tg_id: int, nickname: str) -> None:
         await self.db.execute(
-            "UPDATE users SET nickname = ? WHERE tg_id = ?", (nickname, tg_id)
+            "INSERT INTO users (tg_id, nickname, created_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(tg_id) DO UPDATE SET nickname = excluded.nickname",
+            (tg_id, nickname, time.time()),
         )
         await self.db.commit()
 
     async def set_difficulty(self, tg_id: int, difficulty: str) -> None:
         await self.db.execute(
-            "UPDATE users SET difficulty = ? WHERE tg_id = ?", (difficulty, tg_id)
+            "INSERT INTO users (tg_id, difficulty, created_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(tg_id) DO UPDATE SET difficulty = excluded.difficulty",
+            (tg_id, difficulty, time.time()),
         )
         await self.db.commit()
 

@@ -41,6 +41,10 @@ class WordGame(BaseGame):
         return f"word:{item['w']}"
 
     @classmethod
+    def payload_key(cls, payload: dict[str, Any]) -> str:
+        return cls.item_key({"w": payload.get("word", "")})
+
+    @classmethod
     def render(cls, quest: Quest) -> Render:
         payload = quest.payload
         word = payload["word"]

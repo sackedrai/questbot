@@ -223,6 +223,14 @@ async def main() -> None:
     purged = await db.purge_personal_fields()
     if purged:
         log.info("Очищено личных полей из базы: %s записей", purged)
+    try:
+        from .services import backfill_item_keys
+
+        fixed = await backfill_item_keys()
+        if fixed:
+            log.info("Проставлены ключи заданий: %s квестов", fixed)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Не удалось проставить ключи заданий: %r", exc)
 
     try:
         drop_pending = os.getenv("DROP_PENDING_UPDATES", "1") not in ("0", "false", "no")

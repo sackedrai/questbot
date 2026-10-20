@@ -715,6 +715,16 @@ async def test_rotator() -> None:
         used = await db.used_item_keys(1)
         payload = await game.build("easy", random.Random(7), exclude=used)
         check("_exhausted" in payload, "в payload есть признак исчерпания банка")
+
+        # квесты, выданные до появления ротатора, получают ключ при старте
+        old_id = await db.create_quest(
+            1, "2026-10-20", "quiz", "easy", {"q": "Старый вопрос?"}
+        )
+        check((await db.get_quest(old_id))["item_key"] == "", "у старого квеста ключа нет")
+        fixed = await services.backfill_item_keys()
+        check(fixed == 1, f"ключ восстановлен: {fixed}")
+        restored = (await db.get_quest(old_id))["item_key"]
+        check(restored == "quiz:Старый вопрос?", f"ключ восстановлен верно: {restored}")
     finally:
         await db.close()
 

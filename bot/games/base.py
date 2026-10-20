@@ -151,6 +151,15 @@ class BaseGame:
         return str(item)
 
     @classmethod
+    def payload_key(cls, payload: dict[str, Any]) -> str:
+        """Ключ задания по сохранённому payload.
+
+        Нужен, чтобы восстановить ключи у квестов, выданных до появления
+        ротатора.
+        """
+        return ""
+
+    @classmethod
     def render(cls, quest: Quest) -> Render:
         raise NotImplementedError
 

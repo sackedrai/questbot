@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 import time
 from dataclasses import dataclass
@@ -245,6 +246,28 @@ async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
         )
 
     return summary, points
+
+
+async def backfill_item_keys() -> int:
+    """Проставить ключи квестам, выданным до появления ротатора.
+
+    Иначе прошлые задания не учитывались бы: игрок мог получить то, что
+    уже проходил, а счётчик в профиле показывал бы неправду.
+    """
+    rows = await db.quests_without_key()
+    fixed = 0
+    for row in rows:
+        game = get_game(row["game_type"])
+        try:
+            payload = json.loads(row["payload"])
+        except (TypeError, ValueError):
+            continue
+        key = game.payload_key(payload)
+        if not key:
+            continue
+        await db.set_quest_item_key(row["id"], key)
+        fixed += 1
+    return fixed
 
 
 async def build_profile_text(tg_id: int) -> str:

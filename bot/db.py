@@ -312,6 +312,19 @@ class Database:
             row = await cur.fetchone()
         return int(row["c"]) if row else 0
 
+    async def quests_without_key(self) -> list[aiosqlite.Row]:
+        """Квесты, выданные до появления ротатора (ключ ещё не проставлен)."""
+        async with self.db.execute(
+            "SELECT id, game_type, payload FROM quests WHERE item_key = ''"
+        ) as cur:
+            return list(await cur.fetchall())
+
+    async def set_quest_item_key(self, quest_id: int, item_key: str) -> None:
+        await self.db.execute(
+            "UPDATE quests SET item_key = ? WHERE id = ?", (item_key, quest_id)
+        )
+        await self.db.commit()
+
     async def get_quest(self, quest_id: int) -> Optional[aiosqlite.Row]:
         async with self.db.execute(
             "SELECT * FROM quests WHERE id = ?", (quest_id,)

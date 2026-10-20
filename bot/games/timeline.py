@@ -48,6 +48,10 @@ class TimelineGame(BaseGame):
         return "timeline:" + "|".join(sorted(str(e.get("text", "")) for e in item))
 
     @classmethod
+    def payload_key(cls, payload: dict[str, Any]) -> str:
+        return cls.item_key(list(payload.get("items", [])))
+
+    @classmethod
     def render(cls, quest: Quest) -> Render:
         payload = quest.payload
         items = payload["items"]

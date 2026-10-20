@@ -43,6 +43,10 @@ class FastGame(QuizGame):
         return f"fast:{item['q']}"
 
     @classmethod
+    def payload_key(cls, payload: dict[str, Any]) -> str:
+        return cls.item_key({"q": payload.get("q", "")})
+
+    @classmethod
     def render(cls, quest: Quest) -> Render:
         payload = quest.payload
         builder = InlineKeyboardBuilder()

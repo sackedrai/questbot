@@ -223,6 +223,20 @@ async def main() -> None:
     check(9001 in deleted and 9002 in deleted,
           f"прошлые сообщения бота удалены: {deleted}")
 
+    # --- 8. очистка из меню: само меню остаётся ---
+    await db.track_message(555, 9003, "menu")
+    session.calls.clear()
+    msg_menu = Message(message_id=22, date=datetime.now(timezone.utc),
+                       chat=chat, from_user=user)
+    cq_menu = CallbackQuery(id="cq6", from_user=user, chat_instance="ci",
+                            data="menu:clear", message=msg_menu)
+    await dp.feed_update(bot, Update(update_id=22, callback_query=cq_menu))
+    deleted = [int(c.message_id) for c in session.calls
+               if isinstance(c, DeleteMessage)]
+    check(22 not in deleted, f"меню не удалено при очистке: {deleted}")
+    check("EditMessageText" in session.method_names(),
+          f"меню переписано в экран очистки: {session.method_names()}")
+
     await db.close()
 
     print("\n" + "=" * 60)

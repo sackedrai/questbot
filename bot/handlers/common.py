@@ -195,7 +195,10 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
         text, scope = await build_top_text("all", tg_id)
         await safe_edit(callback.message, text, top_menu(scope))
     elif action == "clear":
-        removed = await cleanup_chat(bot, callback.message.chat.id, db)
+        # само меню не удаляем - его же будем редактировать
+        removed = await cleanup_chat(
+            bot, callback.message.chat.id, db, keep={callback.message.message_id}
+        )
         await safe_edit(
             callback.message,
             "\n".join(

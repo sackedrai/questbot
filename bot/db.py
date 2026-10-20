@@ -335,7 +335,7 @@ class Database:
     async def last_issued_at(self, tg_id: int) -> Optional[float]:
         """Когда игроку последний раз выдавали квест (любой)."""
         async with self.db.execute(
-            "SELECT MAX(created_at) AS t FROM quests WHERE tg_id = ?", (tg_id,)
+            "SELECT MAX(started_at) AS t FROM quests WHERE tg_id = ?", (tg_id,)
         ) as cur:
             row = await cur.fetchone()
         return row["t"] if row and row["t"] else None

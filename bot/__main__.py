@@ -159,6 +159,13 @@ async def main() -> None:
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(main_router)
 
+    log.info(
+        "Параметры прогона: MAX_RUN_MINUTES=%s DISPATCH_NEXT=%s DROP_PENDING_UPDATES=%s",
+        os.getenv("MAX_RUN_MINUTES"),
+        os.getenv("DISPATCH_NEXT"),
+        os.getenv("DROP_PENDING_UPDATES"),
+    )
+
     await db.connect()
     log.info("База данных подключена: %s", db.path)
     try:

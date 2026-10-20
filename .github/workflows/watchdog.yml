@@ -1,0 +1,62 @@
+# Сторож за ботом.
+#
+# Раз в ~20 минут проверяет, работает ли бот:
+#   - если да - ничего не делает;
+#   - если нет - сам запускает новый прогон (автономность);
+#   - если и после перезапусков бот мёртв - пишет владельцу в Telegram.
+#
+# Уведомление отправляется напрямую через Bot API, минуя процесс бота,
+# поэтому дойдёт даже когда бот сломан. Если и это не вышло - workflow
+# падает, и GitHub присылает письмо владельцу репозитория.
+
+name: Watchdog
+
+on:
+  schedule:
+    - cron: '*/17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Зависимости
+        run: python -m pip install -r requirements.txt
+
+      - name: Состояние сторожа
+        uses: actions/cache/restore@v4
+        with:
+          path: .watchdog
+          key: watchdog-${{ github.run_id }}
+          restore-keys: |
+            watchdog-
+
+      - name: Проверить бота
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python tools/watchdog.py
+
+      - name: Сохранить состояние
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .watchdog
+          key: watchdog-${{ github.run_id }}

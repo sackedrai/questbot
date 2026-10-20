@@ -470,6 +470,58 @@ async def test_backup() -> None:
         check("пока не коммичу" in status, f"троттлинг работает: {status}")
 
 
+def test_watchdog_logic() -> None:
+    """Сторож: когда перезапускать, когда тревожить."""
+    section("Сторож")
+
+    from tools.watchdog import (
+        MAX_RESTARTS,
+        STALE_HOURS,
+        Run,
+        State,
+        evaluate,
+    )
+
+    now = 1_700_000_000.0
+    fresh = Run(
+        id=1, status="completed", conclusion="success",
+        created_at=now - 3600, event="workflow_dispatch"
+    )
+    old = Run(
+        id=2, status="completed", conclusion="success",
+        created_at=now - 5 * 3600, event="workflow_dispatch"
+    )
+    failed = Run(
+        id=3, status="completed", conclusion="failure",
+        created_at=now - 600, event="workflow_dispatch"
+    )
+
+    decision = evaluate([fresh], State(), now=now)
+    check(decision.action == "none",
+          f"свежий успешный прогон - всё спокойно: {decision.action}")
+
+    decision = evaluate([old], State(), now=now)
+    check(decision.action == "restart",
+          f"старый прогон - перезапускаем: {decision.action}")
+
+    decision = evaluate([failed], State(), now=now)
+    check(decision.action == "restart",
+          f"упавший прогон - перезапускаем: {decision.action}")
+
+    state = State(fails=MAX_RESTARTS, last_alert=0)
+    decision = evaluate([failed], state, now=now)
+    check(decision.action == "alert" and decision.should_alert,
+          f"после нескольких попыток - тревога: {decision.action}")
+
+    state = State(fails=MAX_RESTARTS, last_alert=now - 60)
+    decision = evaluate([failed], state, now=now)
+    check(decision.action == "alert" and not decision.should_alert,
+          "недавно тревожили - молчим")
+
+    check(STALE_HOURS > 2.0,
+          f"порог 'бот мёртв' больше длительности круга: {STALE_HOURS} ч")
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -482,6 +534,7 @@ async def main() -> None:
     await test_daily_logic()
     await test_adaptive_and_notify()
     await test_backup()
+    test_watchdog_logic()
 
     print("\n" + "=" * 56)
     print(f"  Пройдено: {PASSED}   Провалено: {FAILED}")

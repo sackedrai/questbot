@@ -131,13 +131,14 @@ def fetch_runs(token: str, repo: str, workflow: str = BOT_WORKFLOW) -> list[Run]
         data = json.loads(response.read().decode("utf-8", "replace"))
     runs = []
     for item in data.get("workflow_runs", []):
+        started = _parse_time(item.get("run_started_at"))
+        created = _parse_time(item.get("created_at"))
         runs.append(
             Run(
                 id=int(item["id"]),
                 status=item.get("status", ""),
                 conclusion=item.get("conclusion") or "",
-                created_at=float(item.get("run_started_at") or 0)
-                or _parse_time(item.get("created_at")),
+                created_at=started or created,
                 event=item.get("event", ""),
             )
         )

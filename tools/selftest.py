@@ -521,6 +521,14 @@ def test_watchdog_logic() -> None:
     check(STALE_HOURS > 2.0,
           f"порог 'бот мёртв' больше длительности круга: {STALE_HOURS} ч")
 
+    # разбор дат из API GitHub
+    from tools.watchdog import _parse_time
+
+    stamp = _parse_time("2026-10-20T20:05:07Z")
+    check(stamp > 1_700_000_000,
+          f"дата прогона разобрана: {stamp}")
+    check(_parse_time(None) == 0.0, "пустая дата не ломает разбор")
+
 
 async def main() -> None:
     print("=" * 56)

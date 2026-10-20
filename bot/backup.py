@@ -60,6 +60,27 @@ def _file_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _has_players(path: Path) -> bool:
+    """Есть ли в базе игроки.
+
+    Нужна защита: если бот поднялся с пустой базой, коммит не должен
+    затереть хорошую копию в репозитории.
+    """
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return True  # не SQLite - не наша забота
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+        return bool(row and row[0])
+    except sqlite3.Error:
+        return True
+    finally:
+        conn.close()
+
+
 async def backup_database(
     repo_dir: Path,
     db_path: Path,
@@ -76,6 +97,9 @@ async def backup_database(
         rel_db = db_path.relative_to(repo_dir)
     except ValueError:
         return "база вне репозитория - пропускаю"
+
+    if not _has_players(db_path):
+        return "в базе нет игроков - бэкап не делаю"
 
     backup_file = repo_dir / BACKUP_DIR / BACKUP_NAME
     if backup_file.exists() and _file_hash(backup_file) == _file_hash(db_path):

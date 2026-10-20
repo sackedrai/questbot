@@ -186,9 +186,9 @@ async def main() -> None:
     finally:
         await bot.session.close()
         await db.close()
-
-    await _backup_database()
-    _dispatch_next_run()
+        # даже если бот упал - сохраняем базу и поддерживаем цепочку прогонов
+        await _backup_database()
+        _dispatch_next_run()
 
 
 async def _backup_database() -> None:

@@ -9,6 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..config import HINT_PENALTY
 from ..content import RIDDLES
+from .. import style
 from .base import BaseGame, Quest, Render, is_answer_match
 
 MAX_TRIES = 5
@@ -32,13 +33,15 @@ class RiddleGame(BaseGame):
     @classmethod
     def render(cls, quest: Quest) -> Render:
         payload = quest.payload
-        text = f"🧩 <b>Загадка</b>\n\n{payload['q']}"
+        lines = [
+            style.header("🧩", "ЗАГАДКА"),
+            "",
+            style.question(payload["q"]),
+            "",
+            f"<i>Попыток: {payload.get('tries', 0)}/{MAX_TRIES}</i>",
+        ]
         if payload.get("hint_used"):
-            text += f"\n\n💡 <i>Подсказка: {payload['hint']}</i>"
-        text += (
-            f"\n\n<i>Попыток: {payload.get('tries', 0)}/{MAX_TRIES}</i>"
-            "\n<i>Ответь одним сообщением</i>"
-        )
+            lines += ["", f"💡 {style.note('Подсказка: ' + payload['hint'])}"]
 
         builder = InlineKeyboardBuilder()
         if not payload.get("hint_used") and payload.get("tries", 0) >= 2:
@@ -48,7 +51,7 @@ class RiddleGame(BaseGame):
             )
             builder.adjust(1)
         return Render(
-            text=text,
+            text="\n".join(lines),
             markup=builder.as_markup() if builder.buttons else None,
             needs_input=True,
         )
@@ -58,7 +61,12 @@ class RiddleGame(BaseGame):
         payload = quest.payload
         if is_answer_match(text, payload["answers"]):
             return Render(
-                text=f"✅ <b>Верно!</b>\n\nОтвет: <b>{payload['answers'][0]}</b>",
+                text="\n".join(
+                    [
+                        style.header("✅", "ВЕРНО!"),
+                        style.answer(payload["answers"][0]),
+                    ]
+                ),
                 outcome="solved",
                 hint_used=bool(payload.get("hint_used")),
                 detail=payload["answers"][0],
@@ -67,17 +75,24 @@ class RiddleGame(BaseGame):
         payload["tries"] = payload.get("tries", 0) + 1
         if payload["tries"] >= MAX_TRIES:
             return Render(
-                text=(
-                    "❌ <b>Сдаёшься.</b>\n\n"
-                    f"Ответ был: <b>{payload['answers'][0]}</b>\n"
-                    "<i>Очки за этот квест не начислены.</i>"
+                text="\n".join(
+                    [
+                        style.header("❌", "СДАЁШЬСЯ"),
+                        style.answer(payload["answers"][0]),
+                        style.note("Очки за этот квест не начислены."),
+                    ]
                 ),
                 outcome="failed",
                 hint_used=bool(payload.get("hint_used")),
                 detail=payload["answers"][0],
             )
         return Render(
-            text=f"❌ Не подходит.\n\n<i>Попыток: {payload['tries']}/{MAX_TRIES}</i>",
+            text="\n".join(
+                [
+                    style.header("❌", "НЕ ПОДХОДИТ"),
+                    f"<i>Попыток: {payload['tries']}/{MAX_TRIES}</i>",
+                ]
+            ),
             markup=cls.render(quest).markup,
             needs_input=True,
         )

@@ -177,11 +177,11 @@ async def run_flow(db: Database, game_type: str) -> None:
     # 8. Профиль и рейтинг
     profile_msg = FakeMessage("/profile", user)
     await profile.cmd_profile(profile_msg)
-    check("Профиль" in profile_msg.last_text, "профиль построен")
+    check("профиль" in profile_msg.last_text.lower(), "профиль построен")
 
     top_msg = FakeMessage("/top", user)
     await ranking.cmd_top(top_msg)
-    check("Рейтинг" in top_msg.last_text, "рейтинг построен")
+    check("рейтинг" in top_msg.last_text.lower(), "рейтинг построен")
     check("Вася" in top_msg.last_text, "игрок есть в рейтинге")
 
     # 9–10. Команды
@@ -191,7 +191,7 @@ async def run_flow(db: Database, game_type: str) -> None:
 
     help_msg = FakeMessage("/help", user)
     await common.cmd_help(help_msg)
-    check("Как играть" in help_msg.last_text, "справка отдаётся")
+    check("как играть" in help_msg.last_text.lower(), "справка отдаётся")
 
 
 async def test_failure(db: Database) -> None:

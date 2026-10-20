@@ -7,6 +7,7 @@ from typing import Any
 
 from ..config import WORD_LIVES
 from ..content import WORDS
+from .. import style
 from .base import BaseGame, Quest, Render, normalize_answer
 
 
@@ -31,21 +32,26 @@ class WordGame(BaseGame):
         payload = quest.payload
         word = payload["word"]
         revealed = set(payload.get("revealed", []))
-        mask = "".join(ch if i in revealed else "•" for i, ch in enumerate(word))
+        mask = " ".join(ch if i in revealed else "•" for i, ch in enumerate(word))
 
         lines = [
-            "🔤 <b>Угадай слово</b>",
+            style.header(
+                "🔤",
+                "УГАДАЙ СЛОВО",
+                f"{payload['cat']}  ·  {len(word)} букв",
+            ),
             "",
-            f"Категория: <i>{payload['cat']}</i>",
-            f"Длина: {len(word)} букв",
+            f"<pre>{mask}</pre>",
             "",
-            f"<code>{mask}</code>",
+            f"❤️  <b>{payload.get('lives', WORD_LIVES)}</b>"
+            + (
+                f"   ❌ {', '.join(payload['wrong'])}"
+                if payload.get("wrong")
+                else ""
+            ),
             "",
-            f"❤️  Жизней: {payload.get('lives', WORD_LIVES)}",
+            style.note("Отправь одну букву или всё слово целиком"),
         ]
-        if payload.get("wrong"):
-            lines.append(f"❌ Уже пробовал: {', '.join(payload['wrong'])}")
-        lines += ["", "<i>Отправь одну букву или всё слово целиком</i>"]
         return Render(text="\n".join(lines), needs_input=True)
 
     @classmethod
@@ -73,7 +79,12 @@ class WordGame(BaseGame):
                 if len(revealed) == len(word):
                     extra = cls._extra_mult(len(wrong))
                     return Render(
-                        text=f"✅ <b>Верно!</b>\n\nСлово: <b>{word}</b>",
+                        text="\n".join(
+                            [
+                                style.header("✅", "ВЕРНО!"),
+                                style.answer(word),
+                            ]
+                        ),
                         outcome="solved",
                         extra_mult=extra,
                         detail=word,
@@ -84,10 +95,12 @@ class WordGame(BaseGame):
             payload["lives"] = payload.get("lives", WORD_LIVES) - 1
             if payload["lives"] <= 0:
                 return Render(
-                    text=(
-                        "❌ <b>Жизни кончились.</b>\n\n"
-                        f"Слово было: <b>{word}</b>\n"
-                        "<i>Очки за этот квест не начислены.</i>"
+                    text="\n".join(
+                        [
+                            style.header("❌", "ЖИЗНИ КОНЧИЛИСЬ"),
+                            style.answer(word),
+                            style.note("Очки за этот квест не начислены."),
+                        ]
                     ),
                     outcome="failed",
                     detail=word,
@@ -98,7 +111,12 @@ class WordGame(BaseGame):
         if normalize_answer(raw) == normalize_answer(word):
             extra = cls._extra_mult(len(wrong))
             return Render(
-                text=f"✅ <b>Верно!</b>\n\nСлово: <b>{word}</b>",
+                text="\n".join(
+                    [
+                        style.header("✅", "ВЕРНО!"),
+                        style.answer(word),
+                    ]
+                ),
                 outcome="solved",
                 extra_mult=extra,
                 detail=word,
@@ -108,16 +126,23 @@ class WordGame(BaseGame):
         payload["lives"] = payload.get("lives", WORD_LIVES) - 1
         if payload["lives"] <= 0:
             return Render(
-                text=(
-                    "❌ <b>Жизни кончились.</b>\n\n"
-                    f"Слово было: <b>{word}</b>\n"
-                    "<i>Очки за этот квест не начислены.</i>"
+                text="\n".join(
+                    [
+                        style.header("❌", "ЖИЗНИ КОНЧИЛИСЬ"),
+                        style.answer(word),
+                        style.note("Очки за этот квест не начислены."),
+                    ]
                 ),
                 outcome="failed",
                 detail=word,
             )
         return Render(
-            text=f"❌ Не то слово.\n\n" + cls.render(quest).text.split("\n", 2)[-1],
+            text="\n".join(
+                [
+                    style.header("❌", "НЕ ТО СЛОВО"),
+                    cls.render(quest).text.split("\n", 2)[-1],
+                ]
+            ),
             needs_input=True,
         )
 

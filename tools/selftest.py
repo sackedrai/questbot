@@ -93,7 +93,7 @@ def test_scoring() -> None:
     check(fast > slow, f"скорость даёт больше очков ({fast} > {slow})")
 
     streak_points, reasons = calculate_points(difficulty="medium", streak=6)
-    check(any("серия" in r for r in reasons), "бонус за серию начисляется")
+    check(any("Серия" in label for label, _value in reasons), "бонус за серию начисляется")
 
     hinted, _ = calculate_points(difficulty="medium", streak=0, hint_used=True)
     check(hinted < BASE_POINTS["medium"], f"подсказка уменьшает очки ({hinted})")
@@ -256,6 +256,12 @@ async def test_database() -> None:
     check(quest_id > 0, f"квест создан: id={quest_id}")
     await db.finish_quest(quest_id, 40, "done")
 
+    # игрок с нулём очков в рейтинг не попадает
+    rows = await db.leaderboard(scope="all")
+    check(all(row["tg_id"] != 1 for row in rows),
+          "игрок без очков не попадает в рейтинг")
+
+    await db.add_result(1, 120, True)
     rows = await db.leaderboard(scope="all")
     check(len(rows) >= 1, f"рейтинг построен: {len(rows)} строк")
     check(rows[0]["tg_id"] == 1, "лидер рейтинга — игрок с очками")

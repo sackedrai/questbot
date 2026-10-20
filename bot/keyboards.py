@@ -18,7 +18,6 @@ def main_menu() -> InlineKeyboardMarkup:
     builder.adjust(1)
     return builder.as_markup()
 
-
 def difficulty_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for key in ("easy", "medium", "hard"):
@@ -39,9 +38,9 @@ def after_quest_menu() -> InlineKeyboardMarkup:
 
 def top_menu(active_scope: str = "all") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    marks = {"today": "✅ ", "week": "✅ ", "all": "✅ "}
-    builder.button(text=f"{marks['today']}Сегодня", callback_data="top:today")
-    builder.button(text=f"{marks['week']}Неделя", callback_data="top:week")
-    builder.button(text=f"{marks['all']}Всё время", callback_data="top:all")
+    scopes = (("today", "📅 Сегодня"), ("week", "🗓 Неделя"), ("all", "🌍 Всё время"))
+    for key, title in scopes:
+        mark = "• " if key == active_scope else ""
+        builder.button(text=f"{mark}{title}", callback_data=f"top:{key}")
     builder.adjust(1)
     return builder.as_markup()

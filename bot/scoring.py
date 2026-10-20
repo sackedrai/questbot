@@ -21,42 +21,43 @@ def calculate_points(
     hint_used: bool = False,
     risky: bool = False,
     extra_mult: float = 1.0,
-) -> tuple[int, list[str]]:
+) -> tuple[int, list[tuple[str, str]]]:
     """Посчитать очки за квест.
 
-    Возвращает (очки, список бонусов) — список нужен для показа игроку.
+    Возвращает (очки, разбивка) — разбивка это список пар
+    (подпись, значение), из которого собирается красивая таблица.
     """
     base = BASE_POINTS.get(difficulty, BASE_POINTS["medium"])
     multiplier = 1.0
-    reasons: list[str] = []
+    rows: list[tuple[str, str]] = [("Базовые очки", str(base))]
 
     if timed and elapsed is not None:
         fast_threshold, mid_threshold = FAST_BONUS_SECONDS
         if elapsed <= fast_threshold:
             multiplier *= 1.5
-            reasons.append("скорость ×1.5")
+            rows.append(("Скорость", "×1.5"))
         elif elapsed <= mid_threshold:
             multiplier *= 1.2
-            reasons.append("скорость ×1.2")
+            rows.append(("Скорость", "×1.2"))
 
     streak_multiplier = 1 + min(streak, STREAK_BONUS_MAX_DAYS) * STREAK_BONUS_PER_DAY
     if streak_multiplier > 1:
         multiplier *= streak_multiplier
-        reasons.append(f"серия ×{streak_multiplier:.2f}")
+        rows.append(("Серия дней", f"×{streak_multiplier:.2f}"))
 
     if hint_used:
         multiplier *= HINT_PENALTY
-        reasons.append(f"подсказка ×{HINT_PENALTY}")
+        rows.append(("Подсказка", f"×{HINT_PENALTY}"))
 
     if risky:
         multiplier *= RISKY_MULTIPLIER
-        reasons.append(f"риск ×{RISKY_MULTIPLIER}")
+        rows.append(("Риск", f"×{RISKY_MULTIPLIER}"))
 
     if extra_mult != 1.0:
         multiplier *= extra_mult
-        reasons.append(f"точность ×{extra_mult:.2f}")
+        rows.append(("Точность", f"×{extra_mult:.2f}"))
 
-    return int(round(base * multiplier)), reasons
+    return int(round(base * multiplier)), rows
 
 
 def level_for_points(points: int) -> tuple[int, int, int]:

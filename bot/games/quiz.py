@@ -8,6 +8,7 @@ from typing import Any
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..content import QUIZ
+from .. import style
 from .base import BaseGame, Quest, Render
 
 
@@ -38,10 +39,17 @@ class QuizGame(BaseGame):
             builder.button(text=option, callback_data=f"g:{quest.id}:{index}")
         builder.adjust(1)
         return Render(
-            text=(
-                "🧠 <b>Викторина</b>\n\n"
-                f"{payload['q']}\n\n"
-                f"<i>Категория: {payload['cat']}</i>"
+            text="\n".join(
+                [
+                    style.header(
+                        "🧠",
+                        "ВИКТОРИНА",
+                        f"категория: {payload['cat']}",
+                    ),
+                    "",
+                    style.question(payload["q"]),
+                    style.note("Выбери ответ ↓"),
+                ]
             ),
             markup=builder.as_markup(),
         )
@@ -61,15 +69,22 @@ class QuizGame(BaseGame):
         correct = payload["correct"]
         if index == correct:
             return Render(
-                text=f"✅ <b>Верно!</b>\n\nПравильный ответ: <b>{options[correct]}</b>",
+                text="\n".join(
+                    [
+                        style.header("✅", "ВЕРНО!"),
+                        style.answer(options[correct]),
+                    ]
+                ),
                 outcome="solved",
                 detail=options[correct],
             )
         return Render(
-            text=(
-                "❌ <b>Неверно.</b>\n\n"
-                f"Правильный ответ: <b>{options[correct]}</b>\n"
-                "<i>Очки за этот квест не начислены.</i>"
+            text="\n".join(
+                [
+                    style.header("❌", "НЕВЕРНО"),
+                    style.answer(options[correct]),
+                    style.note("Очки за этот квест не начислены."),
+                ]
             ),
             outcome="failed",
             detail=options[correct],

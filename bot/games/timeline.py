@@ -9,6 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..config import TIMELINE_MAX_MISTAKES
 from ..content import TIMELINE_SETS
+from .. import style
 from .base import BaseGame, Quest, Render
 
 
@@ -36,19 +37,25 @@ class TimelineGame(BaseGame):
         mistakes: int = payload.get("mistakes", 0)
 
         if collected:
-            lines = ["<b>Собранная последовательность:</b>"]
-            for index in collected:
-                lines.append(f"• {items[index]['text']} ({items[index]['year']})")
-            block = "\n".join(lines)
+            block = style.stats(
+                [
+                    (f"{n + 1}.", items[i]["text"], items[i]["year"])
+                    for n, i in enumerate(collected)
+                ],
+                indent=1,
+            )
+            block = f"<b>Собрано:</b>\n{block}"
         else:
-            block = "<i>Пока ничего не отсортировано</i>"
+            block = style.note("Пока ничего не отсортировано")
 
-        text = (
-            "🕰 <b>Хронология</b>\n\n"
-            "События перемешаны. Нажимай на самое раннее из оставшихся — "
-            "и так до конца.\n\n"
-            f"{block}\n\n"
-            f"⚠️ Ошибок: {mistakes}/{TIMELINE_MAX_MISTAKES}"
+        text = "\n".join(
+            [
+                style.header("🕰", "ХРОНОЛОГИЯ", "расставь события по датам"),
+                "",
+                block,
+                "",
+                f"⚠️ Ошибок: <b>{mistakes}/{TIMELINE_MAX_MISTAKES}</b>",
+            ]
         )
 
         builder = InlineKeyboardBuilder()
@@ -85,38 +92,54 @@ class TimelineGame(BaseGame):
             collected.append(index)
             if len(collected) == len(items):
                 extra = 1.0 + 0.1 * (TIMELINE_MAX_MISTAKES - payload.get("mistakes", 0))
+                listing = "\n".join(
+                    f"{n + 1}. {items[i]['text']}  ({items[i]['year']})"
+                    for n, i in enumerate(collected)
+                )
                 return Render(
-                    text=(
-                        "✅ <b>Верно!</b>\n\n"
-                        "Все события собраны в хронологическом порядке:\n"
-                        + "\n".join(f"{n + 1}. {items[i]['text']} ({items[i]['year']})"
-                                   for n, i in enumerate(collected))
+                    text="\n".join(
+                        [
+                            style.header("✅", "ПОРЯДОК ВЕРНЫЙ!"),
+                            listing,
+                        ]
                     ),
                     outcome="solved",
                     extra_mult=round(extra, 2),
                     detail=items[collected[-1]]["text"],
                 )
             return Render(
-                text=f"✅ Верно! Следующее: <b>{items[expected]['text']}</b>",
+                text="\n".join(
+                    [
+                        style.header("✅", "ВЕРНО!"),
+                        style.note(f"Следующее: {items[expected]['text']}"),
+                    ]
+                ),
                 markup=cls.render(quest).markup,
             )
 
         payload["mistakes"] = payload.get("mistakes", 0) + 1
         if payload["mistakes"] >= TIMELINE_MAX_MISTAKES:
+            listing = "\n".join(
+                f"{n + 1}. {item['text']}  ({item['year']})"
+                for n, item in enumerate(items)
+            )
             return Render(
-                text=(
-                    "❌ <b>Слишком много ошибок.</b>\n\n"
-                    "Правильный порядок:\n"
-                    + "\n".join(f"{n + 1}. {item['text']} ({item['year']})"
-                               for n, item in enumerate(items))
+                text="\n".join(
+                    [
+                        style.header("❌", "СЛИШКОМ МНОГО ОШИБОК"),
+                        listing,
+                    ]
                 ),
                 outcome="failed",
                 detail="неправильный порядок",
             )
         return Render(
-            text=(
-                "❌ Не по порядку — это событие было позже.\n\n"
-                f"⚠️ Ошибок: {payload['mistakes']}/{TIMELINE_MAX_MISTAKES}"
+            text="\n".join(
+                [
+                    style.header("❌", "НЕ ПО ПОРЯДКУ"),
+                    style.note("Это событие было позже."),
+                    f"⚠️ Ошибок: <b>{payload['mistakes']}/{TIMELINE_MAX_MISTAKES}</b>",
+                ]
             ),
             markup=cls.render(quest).markup,
         )

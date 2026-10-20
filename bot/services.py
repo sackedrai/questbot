@@ -18,7 +18,8 @@ from .config import (
 )
 from .db import db, today_iso
 from .games import Quest, Render, get_game
-from .scoring import calculate_points, level_for_points, progress_bar
+from .scoring import calculate_points, level_for_points
+from . import style
 
 GAME_TYPES = ("quiz", "fast", "timeline", "riddle", "word")
 
@@ -52,14 +53,23 @@ async def start_quest(tg_id: int, risky: bool) -> QuestStart:
     if used >= limit:
         if risky:
             return QuestStart(
-                text="⚡ Рискованный квест на сегодня уже использован.",
+                text="\n".join(
+                    [
+                        style.header("⚡", "РИСКОВАННЫЙ КВЕСТ ИСПОЛЬЗОВАН"),
+                        style.note("Сегодняшний рискованный квест уже сыгран."),
+                    ]
+                ),
                 blocked=True,
             )
         return QuestStart(
-            text=(
-                "Сегодняшний квест уже пройден.\n\n"
-                "Можно взять <b>рискованный</b> квест: +×2 очка за успех, "
-                f"но −{RISK_PENALTY} очков при провале."
+            text="\n".join(
+                [
+                    style.header("🎯", "КВЕСТ ДНЯ УЖЕ ПРОЙДЕН"),
+                    style.note(
+                        "Но можно взять <b>рискованный</b> квест: "
+                        "×2 очка за успех и −10 очков за провал."
+                    ),
+                ]
             ),
             blocked=True,
         )
@@ -87,8 +97,12 @@ async def start_quest(tg_id: int, risky: bool) -> QuestStart:
     header = ""
     if risky:
         header = (
-            "⚡ <b>Рискованный квест</b>\n"
-            f"<i>Успех — ×2 очка. Провал — −{RISK_PENALTY} очков.</i>\n\n"
+            style.header(
+                "⚡",
+                "РИСКОВАННЫЙ КВЕСТ",
+                f"успех ×2 очка  ·  провал −{RISK_PENALTY}",
+            )
+            + "\n"
         )
 
     return QuestStart(
@@ -107,7 +121,7 @@ async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
 
     if solved:
         streak = await db.touch_day(quest.tg_id, quest.day)
-        points, reasons = calculate_points(
+        points, breakdown = calculate_points(
             difficulty=quest.difficulty,
             streak=streak,
             elapsed=elapsed,
@@ -116,43 +130,53 @@ async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
             risky=bool(quest.risky),
             extra_mult=render.extra_mult,
         )
-        bonus_block = ""
-        if reasons:
-            bonus_block = "\n\n<b>Бонусы:</b>\n" + "\n".join(f"• {r}" for r in reasons)
-        summary = (
-            f"🏆 <b>Квест пройден!</b>\n\n"
-            f"Очки: <b>+{points}</b>{bonus_block}\n"
-            f"🔥 Серия дней: <b>{streak}</b>"
-        )
     else:
         user = await db.get_user(quest.tg_id)
         streak = user["streak"] if user else 0
         points = -RISK_PENALTY if quest.risky else 0
-        if points < 0:
-            summary = (
-                "💔 <b>Квест провален.</b>\n\n"
-                f"Списано очков: <b>−{abs(points)}</b>\n"
-                "Серия не прервана — можно попробовать ещё раз."
-            )
-        else:
-            summary = (
-                "💔 <b>Квест провален.</b>\n"
-                "<i>Очки не начислены. Серия не прервана — можно попробовать ещё раз.</i>"
-            )
+        breakdown = []
 
     await db.add_result(quest.tg_id, points, solved)
     await db.finish_quest(quest.id, points, "done" if solved else "failed")
 
     day_summary = await db.daily_summary(quest.tg_id, quest.day)
-    summary += (
-        "\n\n<b>Сегодня:</b> "
-        f"{day_summary['done']} квестов, {day_summary['points']} очков"
-    )
+    day_points = day_summary["points"]
+
+    if solved:
+        table = style.stats(
+            [("", label, value) for label, value in breakdown],
+            total=("ИТОГО", style.points_line(points)),
+        )
+        summary = "\n".join(
+            [
+                style.header("🏆", "КВЕСТ ПРОЙДЕН!"),
+                table,
+                "",
+                f"🔥 Серия: <b>{streak}</b> дн.  ·  "
+                f"Сегодня: <b>{style.number(day_points)}</b> очков",
+            ]
+        )
+    else:
+        if points < 0:
+            tail = (
+                f"💸 Списано очков: <b>{style.points_line(points)}</b>\n"
+                "Серия не прервана — можно попробовать ещё раз."
+            )
+        else:
+            tail = "Серия не прервана — можно попробовать ещё раз."
+        summary = "\n".join(
+            [
+                style.header("💔", "КВЕСТ НЕ ПРОЙДЕН"),
+                "",
+                tail,
+            ]
+        )
+
     return summary, points
 
 
 async def build_profile_text(tg_id: int) -> str:
-    """Текст профиля игрока."""
+    """Карточка профиля игрока."""
     user = await db.get_user(tg_id)
     if user is None:
         return "Сначала пройди регистрацию: /start"
@@ -163,41 +187,71 @@ async def build_profile_text(tg_id: int) -> str:
     accuracy = round(100 * correct / done) if done else 0
     nickname = user["nickname"] or user["display_name"] or "Без имени"
 
-    return (
-        "👤 <b>Профиль</b>\n\n"
-        f"Имя в рейтинге: <b>{nickname}</b>\n"
-        f"Уровень: <b>{level}</b>  {progress_bar(in_level, need)}\n"
-        f"Очков до следующего уровня: {need - in_level}\n\n"
-        f"💎 Очки всего: <b>{user['points']}</b>\n"
-        f"🔥 Серия: <b>{user['streak']}</b> дн. (рекорд: {user['best_streak']})\n"
-        f"🎯 Квестов пройдено: <b>{done}</b> (успешно {correct})\n"
-        f"📊 Точность: <b>{accuracy}%</b>\n"
-        f"⚙️ Сложность: {DIFFICULTY_TITLES.get(user['difficulty'], user['difficulty'])}\n"
-        f"<i>{DIFFICULTY_HINTS.get(user['difficulty'], '')}</i>"
-    )
+    day_summary = await db.daily_summary(tg_id, today_iso())
+    today_points = day_summary["points"]
+    best_day = await db.best_day_points(tg_id)
+
+    parts = [
+        style.header("👤", "ПРОФИЛЬ", f"{nickname}  ·  🎖 уровень {level}"),
+        style.progress_block(
+            in_level,
+            need,
+            f"до уровня {level + 1}: {style.number(need - in_level)} очков",
+        ),
+        style.section("💎 ОЧКИ"),
+        style.stats(
+            [
+                ("", "Всего", style.number(user["points"])),
+                ("", "Сегодня", style.number(today_points)),
+                ("", "Лучший день", style.number(best_day)),
+            ]
+        ),
+        style.section("🔥 СЕРИЯ"),
+        style.stats(
+            [
+                ("", "Текущая", f"{user['streak']} дн."),
+                ("", "Рекорд", f"{user['best_streak']} дн."),
+            ]
+        ),
+        style.section("🎯 СТАТИСТИКА"),
+        style.stats(
+            [
+                ("", "Квестов", str(done)),
+                ("", "Успешно", f"{correct}  ({accuracy}%)"),
+                ("", "Провалено", str(user["wrong"])),
+            ]
+        ),
+        style.section("⚙️ СЛОЖНОСТЬ"),
+        f"{DIFFICULTY_TITLES.get(user['difficulty'], user['difficulty'])}",
+        style.note(DIFFICULTY_HINTS.get(user["difficulty"], "")),
+        style.footer(),
+    ]
+    return "\n".join(parts)
 
 
 async def build_top_text(scope: str = "all", tg_id: Optional[int] = None) -> tuple[str, str]:
-    """Текст рейтинга. Возвращает (текст, scope)."""
+    """Карточка рейтинга. Возвращает (текст, scope)."""
     scope = scope if scope in SCOPE_TITLES else "all"
     rows = await db.leaderboard(scope=scope, limit=10)
-    title = f"🏆 <b>Рейтинг {SCOPE_TITLES[scope]}</b>\n"
+
+    parts = [style.header("🏆", "РЕЙТИНГ", SCOPE_TITLES[scope])]
 
     if not rows:
-        return title + "\n<i>Пока никто ничего не заработал. Начни первым!</i>", scope
+        parts.append(style.note("Пока никто ничего не заработал. Начни первым!"))
+        return "\n".join(parts), scope
 
-    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-    lines = []
-    for position, row in enumerate(rows, start=1):
+    table_rows = []
+    for row in rows:
         name = row["nickname"] or row["display_name"] or row["username"] or "Аноним"
         points = row["scope_points"] if scope != "all" else row["total_points"]
-        marker = medals.get(position, f"{position}.")
-        lines.append(f"{marker} <b>{name}</b> — {points}")
-
-    text = title + "\n" + "\n".join(lines)
+        table_rows.append((name, style.number(points)))
+    parts.append(style.leaderboard(table_rows))
 
     if tg_id is not None:
         place = await db.user_position(tg_id, scope)
         if place:
-            text += f"\n\n<i>Твоё место: {place}</i>"
-    return text, scope
+            parts.append("")
+            parts.append(f"👤 Твоё место: <b>{place}</b>")
+
+    parts.append(style.footer())
+    return "\n".join(parts), scope

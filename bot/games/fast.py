@@ -8,6 +8,7 @@ from typing import Any
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..content import FAST_QUIZ
+from .. import style
 from .base import Quest, Render
 from .quiz import QuizGame
 
@@ -38,10 +39,13 @@ class FastGame(QuizGame):
             builder.button(text=option, callback_data=f"g:{quest.id}:{index}")
         builder.adjust(1)
         return Render(
-            text=(
-                "⚡ <b>Быстрый квест</b>\n\n"
-                f"{payload['q']}\n\n"
-                "<i>Отвечай быстро — за скорость дают бонусные очки!</i>"
+            text="\n".join(
+                [
+                    style.header("⚡", "БЫСТРЫЙ КВЕСТ", "за скорость дают бонус"),
+                    "",
+                    style.question(payload["q"]),
+                    style.note("Отвечай быстро ↓"),
+                ]
             ),
             markup=builder.as_markup(),
         )

@@ -235,6 +235,17 @@ class Database:
             row = await cur.fetchone()
         return int(row["c"])
 
+    async def best_day_points(self, tg_id: int) -> int:
+        """Лучший день игрока по сумме очков."""
+        async with self.db.execute(
+            "SELECT COALESCE(SUM(points), 0) AS best FROM quests"
+            " WHERE tg_id = ? AND status = 'done' GROUP BY day"
+            " ORDER BY best DESC LIMIT 1",
+            (tg_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        return int(row["best"]) if row else 0
+
     async def daily_summary(self, tg_id: int, day: str) -> aiosqlite.Row:
         async with self.db.execute(
             """
@@ -254,10 +265,16 @@ class Database:
     async def leaderboard(self, scope: str = "all", limit: int = 10) -> list[aiosqlite.Row]:
         if scope == "today":
             where, params = "q.day = ?", (today_iso(),)
+            having = "COALESCE(SUM(q.points), 0)"
+            order = "scope_points DESC, u.points DESC, u.quests_done ASC"
         elif scope == "week":
             where, params = "q.day >= ?", (week_start_iso(),)
+            having = "COALESCE(SUM(q.points), 0)"
+            order = "scope_points DESC, u.points DESC, u.quests_done ASC"
         else:
             where, params = "1 = 1", ()
+            having = "u.points"
+            order = "total_points DESC, u.quests_done ASC"
 
         sql = f"""
             SELECT u.tg_id, u.nickname, u.username, u.display_name, u.difficulty,
@@ -267,8 +284,8 @@ class Database:
               LEFT JOIN quests q
                      ON q.tg_id = u.tg_id AND q.status = 'done' AND {where}
              GROUP BY u.tg_id
-            HAVING scope_points > 0
-            ORDER BY scope_points DESC, u.points DESC, u.quests_done ASC
+            HAVING {having} > 0
+            ORDER BY {order}
              LIMIT ?
         """
         async with self.db.execute(sql, (*params, limit)) as cur:

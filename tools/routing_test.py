@@ -31,7 +31,8 @@ from aiogram.types import (  # noqa: E402
     Update,
     User,
 )
-from aiogram.methods import DeleteMessage, SendMessage  # noqa: E402
+from aiogram.exceptions import TelegramBadRequest  # noqa: E402
+from aiogram.methods import DeleteMessage, EditMessageText, SendMessage  # noqa: E402
 
 from bot.db import Database  # noqa: E402
 from bot.handlers import common, games, profile, quests, ranking  # noqa: E402
@@ -51,11 +52,16 @@ def check(condition: bool, label: str) -> None:
 
 
 class MockSession(AiohttpSession):
-    """Сессия без сети: записывает вызовы и возвращает осмысленный ответ."""
+    """Сессия без сети: записывает вызовы и возвращает осмысленный ответ.
+
+    Повторяет поведение Telegram: если текст сообщения не изменился,
+    editMessageText падает с "message is not modified".
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self.calls: list[object] = []
+        self.texts: dict[tuple[int, int], str] = {}
 
     async def make_request(self, bot, method, timeout=None):
         self.calls.append(method)
@@ -67,6 +73,15 @@ class MockSession(AiohttpSession):
             )
         if isinstance(method, DeleteMessage):
             return True
+        if isinstance(method, EditMessageText):
+            key = (method.chat_id, method.message_id)
+            text = method.text or ""
+            if self.texts.get(key) == text:
+                raise TelegramBadRequest(
+                    method="editMessageText",
+                    message="Bad Request: message is not modified",
+                )
+            self.texts[key] = text
         return method
 
     def method_names(self) -> list[str]:
@@ -236,6 +251,26 @@ async def main() -> None:
     check(22 not in deleted, f"меню не удалено при очистке: {deleted}")
     check("EditMessageText" in session.method_names(),
           f"меню переписано в экран очистки: {session.method_names()}")
+
+    # --- 9. повторное нажатие той же кнопки не плодит сообщения ---
+    session.calls.clear()
+    msg_top = Message(message_id=30, date=datetime.now(timezone.utc),
+                      chat=chat, from_user=user)
+    for _ in range(3):
+        cq_top = CallbackQuery(id="cq7", from_user=user, chat_instance="ci",
+                                data="top:today", message=msg_top)
+        await dp.feed_update(bot, Update(update_id=30, callback_query=cq_top))
+    sent = [c for c in session.calls if isinstance(c, SendMessage)]
+    check(not sent,
+          f"повторные нажатия не создают новых сообщений: {len(sent)}")
+
+    # --- 10. из рейтинга есть кнопка «в меню» ---
+    from bot.keyboards import top_menu
+
+    markup = top_menu("today")
+    labels = [button.text for row in markup.inline_keyboard for button in row]
+    check(any("меню" in label.lower() for label in labels),
+          f"в рейтинге есть кнопка возврата: {labels}")
 
     await db.close()
 

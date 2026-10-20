@@ -43,5 +43,6 @@ def top_menu(active_scope: str = "all") -> InlineKeyboardMarkup:
     for key, title in scopes:
         mark = "• " if key == active_scope else ""
         builder.button(text=f"{mark}{title}", callback_data=f"top:{key}")
+    builder.button(text="🔙 В меню", callback_data="menu:home")
     builder.adjust(1)
     return builder.as_markup()

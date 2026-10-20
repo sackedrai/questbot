@@ -16,12 +16,15 @@ async def safe_edit(
 ) -> None:
     """Изменить сообщение, а если это невозможно — отправить новое.
 
-    Telegram не даёт отредактировать сообщение, если текст не изменился,
-    поэтому в таком случае просто отправляем новое.
+    Если текст не изменился, Telegram отвечает ошибкой "message is not
+    modified" - в этом случае просто ничего не делаем, иначе сообщение
+    размножится в чате.
     """
     try:
         await message.edit_text(text, reply_markup=reply_markup)
-    except TelegramBadRequest:
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return
         await message.answer(text, reply_markup=reply_markup)
 
 

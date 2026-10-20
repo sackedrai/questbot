@@ -1,13 +1,13 @@
-# Одноразовая проверка: раннер видит Telegram и токен принят.
+# Smoke-тесты: проверка логики, роутинга и остановки поллинга.
+#
+# Запускается вручную: Actions -> Smoke -> Run workflow.
+# Полезен после изменений в коде - прогоняет все наборы тестов
+# на настоящем Ubuntu, как в проде.
+
 name: Smoke
 
 on:
   workflow_dispatch:
-    inputs:
-      minutes:
-        description: "Проверочное значение (для отладки входных параметров)"
-        required: false
-        default: "default-value"
 
 permissions:
   contents: read
@@ -15,11 +15,8 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
-      - name: Показать входной параметр
-        run: echo "MINUTES=${{ inputs.minutes || 'default-value' }}"
-
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
@@ -34,7 +31,7 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
         run: python tools/check_channels.py
 
-      - name: Тест логики
+      - name: Тесты
         run: |
           python tools/selftest.py
           python tools/flowtest.py

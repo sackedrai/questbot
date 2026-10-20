@@ -227,7 +227,14 @@ def dispatch_run(token: str, repo: str, workflow: str = BOT_WORKFLOW) -> bool:
 def send_telegram(token: str, chat_id: str, text: str) -> bool:
     """Отправить сообщение в Telegram через Bot API (минуя процесс бота)."""
     url = f"{TELEGRAM_API}/bot{token}/sendMessage"
-    payload = json.dumps({"chat_id": chat_id, "text": text}).encode()
+    payload = json.dumps(
+        {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+    ).encode()
     request = urllib.request.Request(
         url, data=payload, method="POST", headers={"Content-Type": "application/json"}
     )

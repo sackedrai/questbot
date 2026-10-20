@@ -9,6 +9,7 @@ flowtest.py вызывал обработчики напрямую и не пр�
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,7 @@ from aiogram.methods import (  # noqa: E402
     DeleteMessage,
     DeleteMessages,
     EditMessageText,
+    GetMe,
     SendMessage,
 )
 
@@ -76,8 +78,15 @@ class MockSession(AiohttpSession):
                 date=datetime.now(timezone.utc),
                 chat=Chat(id=555, type="private"),
             )
-        if isinstance(method, (DeleteMessage, DeleteMessages)):
+        if isinstance(method, DeleteMessage | DeleteMessages):
             return True
+        if isinstance(method, GetMe):
+            return User(
+                id=1,
+                is_bot=True,
+                first_name="Quest",
+                username="test_quest_bot",
+            )
         if isinstance(method, EditMessageText):
             key = (method.chat_id, method.message_id)
             text = method.text or ""
@@ -129,10 +138,12 @@ async def main() -> None:
     import bot.handlers.ranking as ranking_module
     import bot.services as services_module
     import bot.daily as daily_module
+    import bot.adaptive as adaptive_module
+    import bot.pvp as pvp_module
 
     for module in (services_module, common_module, games_module,
                    profile_module, quests_module, ranking_module,
-                   daily_module):
+                   daily_module, adaptive_module, pvp_module):
         module.db = db
 
     session = MockSession()
@@ -146,16 +157,17 @@ async def main() -> None:
     user = User(id=555, is_bot=False, first_name="Тест")
     chat = Chat(id=555, type="private")
 
-    # --- 1. callback выбора сложности ---
+    # --- 1. callback старого выбора сложности (теперь сложность адаптивная) ---
     message = Message(message_id=1, date=datetime.now(timezone.utc),
                       chat=chat, from_user=user)
     cq = CallbackQuery(id="cq1", from_user=user, chat_instance="ci",
                        data="diff:easy", message=message)
     await dp.feed_update(bot, Update(update_id=1, callback_query=cq))
-
+    check("EditMessageText" in session.method_names(),
+          f"обработчик сложности ответил: {session.method_names()}")
     row = await db.get_user(555)
-    check(row is not None and row["difficulty"] == "easy",
-          f"callback diff:easy обработан (difficulty={row['difficulty'] if row else None})")
+    check(row is None or row["difficulty"] in ("easy", "medium", "hard"),
+          "сложность не задаётся вручную")
     check("EditMessageText" in session.method_names(),
           f"сообщение с кнопками обновлено: {session.method_names()}")
 
@@ -301,6 +313,53 @@ async def main() -> None:
     labels = [button.text for row in markup.inline_keyboard for button in row]
     check(any("меню" in label.lower() for label in labels),
           f"в рейтинге есть кнопка возврата: {labels}")
+
+    # --- 11. PvP: вызов, принятие, одинаковый квест, победа ---
+    await db.create_user(600, "a", "A")
+    await db.create_user(601, "b", "B")
+    user_a = User(id=600, is_bot=False, first_name="A")
+    user_b = User(id=601, is_bot=False, first_name="B")
+
+    session.calls.clear()
+    msg_pvp = Message(message_id=40, date=datetime.now(timezone.utc),
+                       chat=Chat(id=600, type="private"), from_user=user_a,
+                       text="/pvp")
+    await dp.feed_update(bot, Update(update_id=40, message=msg_pvp))
+
+    code = None
+    for call in session.calls:
+        if isinstance(call, SendMessage) and call.text:
+            found = re.search(r"start=pvp_([A-Z0-9]{6})", call.text)
+            if found:
+                code = found.group(1)
+                break
+    check(bool(code), f"код вызова создан: {code}")
+
+    session.calls.clear()
+    msg_acc = Message(message_id=41, date=datetime.now(timezone.utc),
+                       chat=Chat(id=601, type="private"), from_user=user_b,
+                       text=f"/pvp {code}")
+    await dp.feed_update(bot, Update(update_id=41, message=msg_acc))
+
+    quest_a = await db.get_active_quest(600)
+    quest_b = await db.get_active_quest(601)
+    check(quest_a is not None and quest_b is not None,
+          "оба игрока получили квест")
+    if quest_a is not None and quest_b is not None:
+        check(quest_a["payload"] == quest_b["payload"],
+              "квест у обоих одинаковый")
+        check(quest_a["pvp_id"] == quest_b["pvp_id"] and quest_a["pvp_id"] > 0,
+              "квесты привязаны к одному матчу")
+
+        match = await db.finish_pvp(quest_a["pvp_id"], 600, 50)
+        check(match is None, "матч ждёт второго игрока")
+        match = await db.finish_pvp(quest_a["pvp_id"], 601, 30)
+        check(match is not None and match["winner"] == 600,
+              f"победитель определён верно: {match['winner'] if match else None}")
+        winner = await db.get_user(600)
+        loser = await db.get_user(601)
+        check(winner["pvp_wins"] == 1, f"победа засчитана: {winner['pvp_wins']}")
+        check(loser["pvp_losses"] == 1, f"поражение засчитано: {loser['pvp_losses']}")
 
     await db.close()
 

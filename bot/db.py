@@ -55,13 +55,37 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at  REAL    DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS pvp_matches (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    code        TEXT    UNIQUE,
+    player1     INTEGER NOT NULL,
+    player2     INTEGER DEFAULT 0,
+    game_type   TEXT    DEFAULT '',
+    difficulty  TEXT    DEFAULT '',
+    payload     TEXT    DEFAULT '{}',
+    status      TEXT    DEFAULT 'waiting',
+    points1     INTEGER DEFAULT 0,
+    points2     INTEGER DEFAULT 0,
+    winner      INTEGER DEFAULT 0,
+    created_at  REAL    DEFAULT 0,
+    finished_at REAL    DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages (chat_id, id);
+CREATE INDEX IF NOT EXISTS idx_pvp_players ON pvp_matches (player1, player2);
 """
 
 # Новые колонки, которые добавляются к уже существующим таблицам.
 MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     "users": [
         ("tz_offset", "INTEGER DEFAULT 3"),
+        ("notify", "INTEGER DEFAULT 1"),
+        ("pvp_wins", "INTEGER DEFAULT 0"),
+        ("pvp_losses", "INTEGER DEFAULT 0"),
+        ("pvp_points", "INTEGER DEFAULT 0"),
+    ],
+    "quests": [
+        ("pvp_id", "INTEGER DEFAULT 0"),
     ],
 }
 
@@ -174,18 +198,35 @@ class Database:
             await self.db.commit()
         return streak
 
-    async def add_result(self, tg_id: int, points: int, correct: bool) -> aiosqlite.Row:
-        """Начислить (или списать) очки и обновить счётчики."""
+    async def add_result(
+        self,
+        tg_id: int,
+        points: int,
+        correct: bool,
+        count_quest: bool = True,
+    ) -> aiosqlite.Row:
+        """Начислить (или списать) очки и обновить счётчики.
+
+        Для PvP-квестов очки идут в общий зачёт, но сам квест не
+        засчитывается в счётчики - иначе можно было бы набить их
+        дублирующими матчами.
+        """
         await self.db.execute(
             """
             UPDATE users
                SET points      = MAX(0, points + ?),
-                   quests_done = quests_done + 1,
+                   quests_done = quests_done + ?,
                    correct     = correct + ?,
                    wrong       = wrong + ?
              WHERE tg_id = ?
             """,
-            (points, 1 if correct else 0, 0 if correct else 1, tg_id),
+            (
+                points,
+                1 if count_quest else 0,
+                1 if (correct and count_quest) else 0,
+                0 if (correct or not count_quest) else 1,
+                tg_id,
+            ),
         )
         await self.db.commit()
         return await self.get_user(tg_id)  # type: ignore[return-value]
@@ -201,11 +242,13 @@ class Database:
         difficulty: str,
         payload: dict[str, Any],
         risky: bool = False,
+        pvp_id: int = 0,
     ) -> int:
         cur = await self.db.execute(
             """
-            INSERT INTO quests (tg_id, day, game_type, difficulty, payload, risky, started_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO quests (tg_id, day, game_type, difficulty, payload, risky,
+                                pvp_id, started_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 tg_id,
@@ -214,6 +257,7 @@ class Database:
                 difficulty,
                 json.dumps(payload, ensure_ascii=False),
                 1 if risky else 0,
+                pvp_id,
                 time.time(),
             ),
         )
@@ -356,35 +400,229 @@ class Database:
         await self.db.commit()
 
     # ------------------------------------------------------------------
+    # PvP
+    # ------------------------------------------------------------------
+    async def create_pvp_match(
+        self,
+        player1: int,
+        game_type: str,
+        difficulty: str,
+        payload: dict[str, Any],
+        code: str,
+    ) -> int:
+        cur = await self.db.execute(
+            "INSERT INTO pvp_matches (code, player1, game_type, difficulty,"
+            " payload, status, points1, points2, created_at)"
+            " VALUES (?, ?, ?, ?, ?, 'waiting', -1, -1, ?)",
+            (code, player1, game_type, difficulty,
+             json.dumps(payload, ensure_ascii=False), time.time()),
+        )
+        await self.db.commit()
+        return int(cur.lastrowid)
+
+    async def get_pvp_match(self, match_id: int) -> Optional[aiosqlite.Row]:
+        async with self.db.execute(
+            "SELECT * FROM pvp_matches WHERE id = ?", (match_id,)
+        ) as cur:
+            return await cur.fetchone()
+
+    async def get_pvp_by_code(self, code: str) -> Optional[aiosqlite.Row]:
+        async with self.db.execute(
+            "SELECT * FROM pvp_matches WHERE code = ?", (code,)
+        ) as cur:
+            return await cur.fetchone()
+
+    async def accept_pvp(self, match_id: int, player2: int) -> None:
+        await self.db.execute(
+            "UPDATE pvp_matches SET player2 = ?, status = 'active' WHERE id = ?",
+            (player2, match_id),
+        )
+        await self.db.commit()
+
+    async def finish_pvp(
+        self, match_id: int, player: int, points: int
+    ) -> Optional[aiosqlite.Row]:
+        """Записать результат игрока. Возвращает матч, если он завершён."""
+        match = await self.get_pvp_match(match_id)
+        if match is None:
+            return None
+
+        if player == match["player1"]:
+            await self.db.execute(
+                "UPDATE pvp_matches SET points1 = ? WHERE id = ?", (points, match_id)
+            )
+        else:
+            await self.db.execute(
+                "UPDATE pvp_matches SET points2 = ? WHERE id = ?", (points, match_id)
+            )
+        await self.db.commit()
+
+        match = await self.get_pvp_match(match_id)
+        if match is None or match["points1"] < 0 or match["points2"] < 0:
+            return None
+
+        p1, p2 = match["points1"], match["points2"]
+        winner = 0
+        if p1 > p2:
+            winner = match["player1"]
+        elif p2 > p1:
+            winner = match["player2"]
+
+        await self.db.execute(
+            "UPDATE pvp_matches SET winner = ?, status = 'finished', finished_at = ?"
+            " WHERE id = ?",
+            (winner, time.time(), match_id),
+        )
+        if winner:
+            loser = match["player2"] if winner == match["player1"] else match["player1"]
+            await self.db.execute(
+                "UPDATE users SET pvp_wins = pvp_wins + 1,"
+                " pvp_points = pvp_points + ? WHERE tg_id = ?",
+                (max(p1, p2), winner),
+            )
+            await self.db.execute(
+                "UPDATE users SET pvp_losses = pvp_losses + 1 WHERE tg_id = ?",
+                (loser,),
+            )
+        else:
+            for pid in (match["player1"], match["player2"]):
+                await self.db.execute(
+                    "UPDATE users SET pvp_points = pvp_points + ? WHERE tg_id = ?",
+                    (max(p1, p2), pid),
+                )
+        await self.db.commit()
+        return await self.get_pvp_match(match_id)
+
+    async def pvp_rating(self, limit: int = 10) -> list[aiosqlite.Row]:
+        """Рейтинг PvP: победы, поражения, очки."""
+        async with self.db.execute(
+            "SELECT tg_id, nickname, username, display_name, pvp_wins, pvp_losses,"
+            " pvp_points FROM users"
+            " WHERE pvp_wins > 0 OR pvp_losses > 0"
+            " ORDER BY pvp_wins DESC, pvp_points DESC, pvp_losses ASC LIMIT ?",
+            (limit,),
+        ) as cur:
+            return list(await cur.fetchall())
+
+    # ------------------------------------------------------------------
+    # адаптивная сложность
+    # ------------------------------------------------------------------
+    async def recent_results(self, tg_id: int, limit: int = 6) -> list[aiosqlite.Row]:
+        """Последние завершённые квесты игрока."""
+        async with self.db.execute(
+            "SELECT status, points, difficulty, risky FROM quests"
+            " WHERE tg_id = ? AND status IN ('done', 'failed')"
+            " ORDER BY id DESC LIMIT ?",
+            (tg_id, limit),
+        ) as cur:
+            return list(await cur.fetchall())
+
+    async def notify_enabled(self, tg_id: int) -> bool:
+        user = await self.get_user(tg_id)
+        if user is None:
+            return True
+        return bool(user["notify"])
+
+    async def set_notify(self, tg_id: int, enabled: bool) -> None:
+        await self.db.execute(
+            "UPDATE users SET notify = ? WHERE tg_id = ?",
+            (1 if enabled else 0, tg_id),
+        )
+        await self.db.commit()
+
+    # ------------------------------------------------------------------
     # рейтинг
     # ------------------------------------------------------------------
     async def leaderboard(self, scope: str = "all", limit: int = 10) -> list[aiosqlite.Row]:
-        if scope == "today":
-            where, params = "q.day = ?", (today_iso(),)
-            having = "COALESCE(SUM(q.points), 0)"
-            order = "scope_points DESC, u.points DESC, u.quests_done ASC"
-        elif scope == "week":
-            where, params = "q.day >= ?", (week_start_iso(),)
-            having = "COALESCE(SUM(q.points), 0)"
-            order = "scope_points DESC, u.points DESC, u.quests_done ASC"
-        else:
-            where, params = "1 = 1", ()
-            having = "u.points"
-            order = "total_points DESC, u.quests_done ASC"
+        """Таблица лидеров по разным срезам.
 
+        all / today / week  - очки
+        quests / quests_today - количество пройденных квестов
+        pvp - победы в PvP
+        """
+        if scope == "today":
+            return await self._points_board(today_iso(), limit)
+        if scope == "week":
+            return await self._points_board(week_start_iso(), limit)
+        if scope == "quests":
+            return await self._quests_board(None, limit)
+        if scope == "quests_today":
+            return await self._quests_board(today_iso(), limit)
+        if scope == "pvp":
+            return await self._pvp_board(limit)
+        return await self._points_board(None, limit, total=True)
+
+    async def _points_board(
+        self, day: Optional[str], limit: int, total: bool = False
+    ) -> list[aiosqlite.Row]:
+        if total:
+            # общий зачёт: считаем накопленные очки игрока
+            sql = """
+                SELECT u.tg_id, u.nickname, u.username, u.display_name,
+                       u.points AS scope_points, u.points AS total_points
+                  FROM users u
+                 WHERE u.points > 0
+                ORDER BY u.points DESC, u.quests_done ASC
+                 LIMIT ?
+            """
+            async with self.db.execute(sql, (limit,)) as cur:
+                return list(await cur.fetchall())
+
+        where = "1 = 1"
+        params: tuple[Any, ...] = ()
+        if day is not None:
+            where = "q.day = ?"
+            params = (day,)
         sql = f"""
-            SELECT u.tg_id, u.nickname, u.username, u.display_name, u.difficulty,
+            SELECT u.tg_id, u.nickname, u.username, u.display_name,
                    u.points AS total_points,
                    COALESCE(SUM(q.points), 0) AS scope_points
               FROM users u
               LEFT JOIN quests q
                      ON q.tg_id = u.tg_id AND q.status = 'done' AND {where}
              GROUP BY u.tg_id
-            HAVING {having} > 0
-            ORDER BY {order}
+            HAVING scope_points > 0
+            ORDER BY scope_points DESC, u.points DESC, u.quests_done ASC
              LIMIT ?
         """
         async with self.db.execute(sql, (*params, limit)) as cur:
+            return list(await cur.fetchall())
+
+    async def _quests_board(
+        self, day: Optional[str], limit: int
+    ) -> list[aiosqlite.Row]:
+        where = "1 = 1"
+        params: tuple[Any, ...] = ()
+        if day is not None:
+            where = "q.day = ?"
+            params = (day,)
+        sql = f"""
+            SELECT u.tg_id, u.nickname, u.username, u.display_name,
+                   COUNT(q.id) AS scope_points,
+                   COALESCE(SUM(q.points), 0) AS total_points
+              FROM users u
+              LEFT JOIN quests q
+                     ON q.tg_id = u.tg_id AND q.status = 'done' AND {where}
+             GROUP BY u.tg_id
+            HAVING scope_points > 0
+            ORDER BY scope_points DESC, total_points DESC
+             LIMIT ?
+        """
+        async with self.db.execute(sql, (*params, limit)) as cur:
+            return list(await cur.fetchall())
+
+    async def _pvp_board(self, limit: int) -> list[aiosqlite.Row]:
+        sql = """
+            SELECT u.tg_id, u.nickname, u.username, u.display_name,
+                   u.pvp_wins AS scope_points,
+                   u.pvp_losses AS pvp_losses,
+                   u.pvp_points AS total_points
+              FROM users u
+             WHERE u.pvp_wins > 0 OR u.pvp_losses > 0
+            ORDER BY u.pvp_wins DESC, u.pvp_points DESC, u.pvp_losses ASC
+             LIMIT ?
+        """
+        async with self.db.execute(sql, (limit,)) as cur:
             return list(await cur.fetchall())
 
     async def user_position(self, tg_id: int, scope: str = "all") -> Optional[int]:

@@ -45,8 +45,12 @@ async def main() -> None:
     await db.connect()
 
     import bot.services as services_module
+    import bot.adaptive as adaptive_module
+    import bot.daily as daily_module
+    import bot.pvp as pvp_module
 
-    services_module.db = db
+    for module in (services_module, adaptive_module, daily_module, pvp_module):
+        module.db = db
 
     try:
         await _render(db)

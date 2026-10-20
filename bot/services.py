@@ -11,8 +11,6 @@ from aiogram.types import InlineKeyboardMarkup
 
 from .config import (
     BONUS_QUEST_PER_DAY,
-    DIFFICULTY_HINTS,
-    DIFFICULTY_TITLES,
     QUEST_PER_DAY,
     RISK_PENALTY,
 )
@@ -20,14 +18,17 @@ from .db import db, today_iso
 from .daily import STATE_ACTIVE, STATE_COOLDOWN, availability
 from .games import Quest, Render, get_game
 from .scoring import calculate_points, level_for_points
-from . import style
+from . import adaptive, style
 
 GAME_TYPES = ("quiz", "fast", "timeline", "riddle", "word")
 
 SCOPE_TITLES = {
-    "today": "за сегодня",
-    "week": "за неделю",
-    "all": "за всё время",
+    "today": "очки за сегодня",
+    "week": "очки за неделю",
+    "all": "очки за всё время",
+    "quests_today": "квесты за сегодня",
+    "quests": "квесты за всё время",
+    "pvp": "рейтинг PvP",
 }
 
 
@@ -42,48 +43,69 @@ class QuestStart:
     blocked: bool = False
 
 
-async def start_quest(tg_id: int, risky: bool) -> QuestStart:
-    """Выдать игроку новый квест."""
+async def start_quest(
+    tg_id: int,
+    risky: bool = False,
+    *,
+    pvp_id: int = 0,
+    game_type: str | None = None,
+    difficulty: str | None = None,
+    payload: dict | None = None,
+) -> QuestStart:
+    """Выдать игроку новый квест.
+
+    Для PvP передаются готовые game_type/difficulty/payload - тогда у обоих
+    игроков одинаковое задание.
+    """
     user = await db.get_user(tg_id)
     if user is None:
         return QuestStart(text="Сначала пройди регистрацию: /start", blocked=True)
 
     day = today_iso()
-    avail = await availability(tg_id, risky=risky)
-    if avail.state == STATE_ACTIVE:
-        return QuestStart(
-            text="\n".join(
-                [
-                    style.header("⏳", "КВЕСТ ЕЩЁ НЕ ЗАКОНЧЕН"),
-                    style.note("Ответь на него или нажми «Сдаться», чтобы взять новый."),
-                ]
-            ),
-            blocked=True,
-        )
-    if avail.state == STATE_COOLDOWN:
-        return QuestStart(
-            text="\n".join(
-                [
-                    style.header(
-                        "⏳",
-                        "СЛЕДУЮЩИЙ КВЕСТ ЧЕРЕЗ",
-                        avail.human_due() + "  ·  " + avail.human_left(),
-                    ),
-                    style.note(
-                        "Следующий квест доступен через 24 часа после прошлого."
-                    ),
-                ]
-            ),
-            blocked=True,
-        )
 
-    difficulty = user["difficulty"] or "medium"
+    if pvp_id == 0:
+        avail = await availability(tg_id, risky=risky)
+        if avail.state == STATE_ACTIVE:
+            return QuestStart(
+                text="\n".join(
+                    [
+                        style.header("⏳", "КВЕСТ ЕЩЁ НЕ ЗАКОНЧЕН"),
+                        style.note(
+                            "Ответь на него или нажми «Сдаться», чтобы взять новый."
+                        ),
+                    ]
+                ),
+                blocked=True,
+            )
+        if avail.state == STATE_COOLDOWN:
+            return QuestStart(
+                text="\n".join(
+                    [
+                        style.header(
+                            "⏳",
+                            "СЛЕДУЮЩИЙ КВЕСТ ЧЕРЕЗ",
+                            avail.human_due() + "  ·  " + avail.human_left(),
+                        ),
+                        style.note(
+                            "Следующий квест доступен через 24 часа после прошлого."
+                        ),
+                    ]
+                ),
+                blocked=True,
+            )
+
     rng = random.Random(f"{tg_id}:{day}:{time.time_ns()}")
-    game_type = rng.choice(GAME_TYPES)
+    if difficulty is None:
+        difficulty = await adaptive.pick_difficulty(tg_id, rng)
+    if game_type is None:
+        game_type = rng.choice(GAME_TYPES)
     game = get_game(game_type)
 
-    payload = await game.build(difficulty, rng)
-    quest_id = await db.create_quest(tg_id, day, game_type, difficulty, payload, risky)
+    if payload is None:
+        payload = await game.build(difficulty, rng)
+    quest_id = await db.create_quest(
+        tg_id, day, game_type, difficulty, payload, risky, pvp_id
+    )
 
     quest = Quest(
         id=quest_id,
@@ -98,7 +120,9 @@ async def start_quest(tg_id: int, risky: bool) -> QuestStart:
     render = game.render(quest)
 
     header = ""
-    if risky:
+    if pvp_id:
+        header = style.header("⚔️", "МАТЧ PvP") + "\n"
+    elif risky:
         header = (
             style.header(
                 "⚡",
@@ -107,6 +131,8 @@ async def start_quest(tg_id: int, risky: bool) -> QuestStart:
             )
             + "\n"
         )
+    elif difficulty:
+        header = style.note(f"Сложность: {adaptive.describe(difficulty)}") + "\n"
 
     return QuestStart(
         text=header + render.text,
@@ -121,9 +147,15 @@ async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
     game = get_game(quest.game_type)
     solved = render.outcome == "solved"
     elapsed = max(0.0, time.time() - quest.started_at)
+    is_pvp = bool(quest.pvp_id)
 
     if solved:
-        streak = await db.touch_day(quest.tg_id, quest.day)
+        if is_pvp:
+            # матч не влияет на серию дней
+            user = await db.get_user(quest.tg_id)
+            streak = user["streak"] if user else 0
+        else:
+            streak = await db.touch_day(quest.tg_id, quest.day)
         points, breakdown = calculate_points(
             difficulty=quest.difficulty,
             streak=streak,
@@ -139,8 +171,27 @@ async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
         points = -RISK_PENALTY if quest.risky else 0
         breakdown = []
 
-    await db.add_result(quest.tg_id, points, solved)
+    await db.add_result(quest.tg_id, points, solved, count_quest=not is_pvp)
     await db.finish_quest(quest.id, points, "done" if solved else "failed")
+
+    if is_pvp:
+        await db.finish_pvp(quest.pvp_id, quest.tg_id, points)
+        day_summary = await db.daily_summary(quest.tg_id, quest.day)
+        table = style.stats(
+            [("", label, value) for label, value in breakdown],
+            total=("ИТОГО", style.points_line(points)),
+        )
+        return (
+            "\n".join(
+                [
+                    style.header("⚔️", "ТВОЙ РЕЗУЛЬТАТ В МАТЧЕ"),
+                    table,
+                    "",
+                    style.note("Ждём соперника."),
+                ]
+            ),
+            points,
+        )
 
     day_summary = await db.daily_summary(quest.tg_id, quest.day)
     day_points = day_summary["points"]
@@ -193,6 +244,7 @@ async def build_profile_text(tg_id: int) -> str:
     day_summary = await db.daily_summary(tg_id, today_iso())
     today_points = day_summary["points"]
     best_day = await db.best_day_points(tg_id)
+    adaptive_level = await adaptive.current_level(tg_id)
 
     parts = [
         style.header("👤", "ПРОФИЛЬ", f"{nickname}  ·  🎖 уровень {level}"),
@@ -224,9 +276,17 @@ async def build_profile_text(tg_id: int) -> str:
                 ("", "Провалено", str(user["wrong"])),
             ]
         ),
-        style.section("⚙️ СЛОЖНОСТЬ"),
-        f"{DIFFICULTY_TITLES.get(user['difficulty'], user['difficulty'])}",
-        style.note(DIFFICULTY_HINTS.get(user["difficulty"], "")),
+        style.section("⚔️ PvP"),
+        style.stats(
+            [
+                ("", "Побед", str(user["pvp_wins"] or 0)),
+                ("", "Поражений", str(user["pvp_losses"] or 0)),
+                ("", "Очки матчей", style.number(user["pvp_points"] or 0)),
+            ]
+        ),
+        style.section("🎚 СЛОЖНОСТЬ"),
+        f"{adaptive.TITLES.get(adaptive_level, adaptive_level)} — авто",
+        style.note(adaptive.DESCRIPTIONS.get(adaptive_level, "")),
         style.footer(),
     ]
     return "\n".join(parts)

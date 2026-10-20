@@ -362,6 +362,43 @@ async def test_daily_logic() -> None:
     await db.close()
 
 
+async def test_adaptive_and_notify() -> None:
+    """Адаптивная сложность и переключатель уведомлений."""
+    section("Адаптив и уведомления")
+
+    import random
+
+    import bot.adaptive as adaptive
+
+    db = Database(":memory:")
+    await db.connect()
+    adaptive.db = db
+    await db.create_user(1, "u", "U")
+
+    level = await adaptive.pick_difficulty(1, random.Random(1))
+    check(level == "easy", f"новичку начинаем легко: {level}")
+
+    for _ in range(6):
+        quest_id = await db.create_quest(1, "2026-10-21", "quiz", "easy", {"q": "?"})
+        await db.finish_quest(quest_id, 30, "done")
+    level = await adaptive.current_level(1)
+    check(level == "hard", f"после серии успехов - сложнее: {level}")
+
+    for _ in range(6):
+        quest_id = await db.create_quest(1, "2026-10-21", "quiz", "easy", {"q": "?"})
+        await db.finish_quest(quest_id, 0, "failed")
+    level = await adaptive.current_level(1)
+    check(level == "easy", f"после серии провалов - легче: {level}")
+
+    check(await db.notify_enabled(1) is True, "уведомления включены по умолчанию")
+    await db.set_notify(1, False)
+    check(await db.notify_enabled(1) is False, "уведомления выключаются")
+    await db.set_notify(1, True)
+    check(await db.notify_enabled(1) is True, "уведомления включаются обратно")
+
+    await db.close()
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -372,6 +409,7 @@ async def main() -> None:
     await test_database()
     await test_tracking_session()
     await test_daily_logic()
+    await test_adaptive_and_notify()
 
     print("\n" + "=" * 56)
     print(f"  Пройдено: {PASSED}   Провалено: {FAILED}")

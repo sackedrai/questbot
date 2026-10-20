@@ -135,6 +135,8 @@ async def run_daily_pass(bot: Bot, max_wait: float = 0.0) -> int:
     plan: list[tuple[float, int]] = []
 
     for user in await db.all_users():
+        if not await db.notify_enabled(user["tg_id"]):
+            continue  # игрок выключил уведомления
         moment = await auto_moment(user["tg_id"])
         if moment is None:
             continue

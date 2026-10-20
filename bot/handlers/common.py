@@ -9,9 +9,8 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from ..config import DIFFICULTY_HINTS, DIFFICULTY_TITLES
 from ..db import db
-from ..keyboards import difficulty_menu, main_menu, top_menu
+from ..keyboards import main_menu, top_menu
 from ..services import build_profile_text, build_top_text, start_quest
 from ..states import Game, Onboarding
 from .. import style
@@ -45,12 +44,19 @@ HELP_TEXT = "\n".join(
         "Скорость         ×1.5 или ×1.2\n"
         "Подсказка        ×0.6\n"
         "Риск             ×2 очка, минус 10 за провал</pre>",
+        style.section("ЧТО ЕЩЁ УМЕЕТ БОТ"),
+        "<pre>🎚 Сложность      подбирается автоматически\n"
+        "⚔️ PvP           вызов на бой, одинаковый квест\n"
+        "🏆 Рейтинг       очки, квесты и PvP - отдельно\n"
+        "🔔 Уведомления   можно отключить в настройках</pre>",
         style.section("КОМАНДЫ"),
         "<pre>/quest        квест дня\n"
         "/risk         рискованный квест\n"
+        "/pvp          вызвать соперника на бой\n"
         "/top          рейтинг\n"
         "/profile      профиль\n"
-        "/difficulty  сменить сложность\n"
+        "/settings     настройки\n"
+        "/difficulty   текущий уровень сложности\n"
         "/tz           часовой пояс\n"
         "/invite       ссылка для друзей\n"
         "/clear        очистить чат полностью\n"
@@ -85,6 +91,24 @@ WELCOME_TEXT = "\n".join(
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot) -> None:
     tg_id = message.from_user.id
+
+    # deep-link: /start pvp_КОД - принять вызов
+    text = message.text or ""
+    if "pvp_" in text:
+        from .pvp import accept_flow
+
+        code = text.split("pvp_", 1)[1].split()[0].strip().upper()
+        user = await db.get_user(tg_id)
+        if user is None:
+            await db.create_user(
+                tg_id,
+                message.from_user.username or "",
+                message.from_user.full_name or "",
+            )
+            await db.set_nickname(tg_id, (message.from_user.full_name or "Игрок")[:20])
+        await accept_flow(message, bot, code)
+        return
+
     user = await db.get_user(tg_id)
     if user is None:
         await db.create_user(
@@ -115,56 +139,52 @@ async def on_nickname(message: Message, state: FSMContext, bot: Bot) -> None:
     nickname = html.escape(message.text.strip()[:20]) or "Аноним"
     await db.set_nickname(message.from_user.id, nickname)
     await state.clear()
-    sent = await message.answer(
+    await message.answer(
         "\n".join(
             [
                 style.header("🤝", "ПРИЯТНО ПОЗНАКОМИТЬСЯ!", nickname),
                 "",
-                "Выбери сложность квестов — её можно поменять в любой момент.",
-                "",
-                f"{DIFFICULTY_TITLES['easy']}\n"
-                f"   {style.note(DIFFICULTY_HINTS['easy'])}",
-                "",
-                f"{DIFFICULTY_TITLES['medium']}\n"
-                f"   {style.note(DIFFICULTY_HINTS['medium'])}",
-                "",
-                f"{DIFFICULTY_TITLES['hard']}\n"
-                f"   {style.note(DIFFICULTY_HINTS['hard'])}",
+                style.note("Сложность бот подбирает сам - по твоим результатам."),
+                style.note("Твой первый квест уже ждёт."),
             ]
         ),
-        reply_markup=difficulty_menu(),
+        reply_markup=main_menu(),
     )
-    return sent
+
+
+@router.message(Command("difficulty"))
+async def cmd_difficulty(message: Message) -> None:
+    """Показать текущий адаптивный уровень."""
+    from .. import adaptive
+
+    level = await adaptive.current_level(message.from_user.id)
+    await message.answer(
+        "\n".join(
+            [
+                style.header("🎚", "СЛОЖНОСТЬ АВТОМАТИЧЕСКАЯ", adaptive.describe(level)),
+                style.note("Бот смотрит, как ты играешь, и сам меняет уровень."),
+            ]
+        )
+    )
 
 
 @router.callback_query(F.data.startswith("diff:"))
 async def on_difficulty(callback: CallbackQuery, state: FSMContext) -> None:
-    difficulty = callback.data.split(":", 1)[1]
-    if difficulty not in DIFFICULTY_TITLES:
-        await callback.answer()
-        return
-    await db.set_difficulty(callback.from_user.id, difficulty)
-    await state.clear()
+    """Старый выбор сложности - теперь она адаптивная."""
+    from .. import adaptive
+
+    level = await adaptive.current_level(callback.from_user.id)
     await safe_edit(
         callback.message,
         "\n".join(
             [
-                style.header("⚙️", "НАСТРОЙКА ГОТОВА"),
-                "",
-                f"Сложность: <b>{DIFFICULTY_TITLES[difficulty]}</b>",
-                style.note(DIFFICULTY_HINTS[difficulty]),
-                "",
-                style.note("Поменять можно в любой момент: /difficulty"),
+                style.header("🎚", "СЛОЖНОСТЬ АВТОМАТИЧЕСКАЯ", adaptive.describe(level)),
+                style.note("Бот сам меняет уровень по твоим результатам."),
             ]
         ),
         main_menu(),
     )
     await callback.answer()
-
-
-@router.message(Command("difficulty"))
-async def cmd_difficulty(message: Message) -> None:
-    await message.answer("Выбери сложность квестов:", reply_markup=difficulty_menu())
 
 
 @router.message(Command("help"))
@@ -322,6 +342,31 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
                 [
                     style.header("🧹", "ЧАТ ОЧИЩЕН"),
                     style.note(f"Удалено сообщений: {deleted} из {total}"),
+                ]
+            ),
+            main_menu(),
+        )
+    elif action == "pvp":
+        from .pvp import create_flow
+
+        await create_flow(callback.message, bot)
+    elif action == "settings":
+        from .settings import _settings_markup
+
+        text, builder = await _settings_markup(callback.from_user.id)
+        await safe_edit(callback.message, text, builder.as_markup())
+    elif action == "invite":
+        me = await bot.me()
+        link = f"https://t.me/{me.username}"
+        await safe_edit(
+            callback.message,
+            "\n".join(
+                [
+                    style.header("🔗", "ПРИГЛАШЕНИЕ"),
+                    f"Отправь друзьям ссылку:\n\n<b>{link}</b>",
+                    "",
+                    style.note("Каждый играет сам: своя статистика, свой квест в сутки."),
+                    style.note("А в рейтинге видно всех сразу."),
                 ]
             ),
             main_menu(),

@@ -50,6 +50,7 @@ class Quest:
     status: str = "active"
     risky: int = 0
     started_at: float = 0.0
+    pvp_id: int = 0
 
     @classmethod
     def from_row(cls, row: Any) -> "Quest":
@@ -64,6 +65,7 @@ class Quest:
             status=row["status"],
             risky=row["risky"],
             started_at=row["started_at"],
+            pvp_id=row["pvp_id"] if "pvp_id" in row.keys() else 0,
         )
 
 

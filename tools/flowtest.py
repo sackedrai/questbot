@@ -167,10 +167,12 @@ async def run_flow(db: Database, game_type: str) -> None:
     row = await db.get_user(user.id)
     check(row["nickname"] == "Вася", f"ник сохранён: {row['nickname']}")
 
-    # 2. Выбор сложности
-    await common.on_difficulty(FakeCallback("diff:hard", user, message), state)
-    row = await db.get_user(user.id)
-    check(row["difficulty"] == "hard", f"сложность сохранена: {row['difficulty']}")
+    # 2. Сложность теперь адаптивная - выбор убран
+    import bot.adaptive as adaptive_module
+
+    level = await adaptive_module.current_level(user.id)
+    check(level in ("easy", "medium", "hard"),
+          f"адаптивный уровень определён: {level}")
 
     # 3–5. Квест и ответ
     await play_quest(db, user, game_type, state, fake_bot)
@@ -263,6 +265,8 @@ async def main() -> None:
     import bot.handlers.ranking as ranking_module
     import bot.services as services_module
     import bot.daily as daily_module
+    import bot.adaptive as adaptive_module
+    import bot.pvp as pvp_module
 
     for module in (
         services_module,
@@ -272,6 +276,8 @@ async def main() -> None:
         quests_module,
         ranking_module,
         daily_module,
+        adaptive_module,
+        pvp_module,
     ):
         module.db = db
 

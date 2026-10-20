@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -13,7 +13,6 @@ from ..services import complete_quest
 from ..states import Game
 from .. import style
 from ..utils import safe_edit
-
 router = Router()
 
 
@@ -54,8 +53,38 @@ async def on_game_callback(callback: CallbackQuery, state: FSMContext) -> None:
 
     summary, _points = await complete_quest(quest, render)
     await state.clear()
+
+    if quest.pvp_id:
+        await _announce_pvp(callback, bot, quest, summary)
+        await callback.answer()
+        return
+
     await safe_edit(callback.message, f"{render.text}\n\n{summary}", after_quest_menu())
     await callback.answer()
+
+
+async def _announce_pvp(callback: CallbackQuery, bot: Bot, quest: Quest, summary: str) -> None:
+    """Сообщить о результате матча обоим игрокам."""
+    from ..pvp import format_match, opponent_of
+
+    match = await db.get_pvp_match(quest.pvp_id)
+    if match is None:
+        await safe_edit(callback.message, summary, main_menu())
+        return
+
+    if match["status"] != "finished":
+        await safe_edit(callback.message, summary, main_menu())
+        return
+
+    final = await format_match(match, quest.tg_id)
+    await safe_edit(callback.message, final, main_menu())
+
+    opponent = await opponent_of(match, quest.tg_id)
+    if opponent:
+        try:
+            await bot.send_message(opponent, await format_match(match, opponent))
+        except Exception:  # noqa: BLE001
+            pass
 
 
 @router.callback_query(F.data.startswith("skip:"))
@@ -80,6 +109,12 @@ async def on_skip(callback: CallbackQuery, state: FSMContext) -> None:
 
     await db.finish_quest(quest_id, 0, "skipped")
     await state.clear()
+
+    pvp_id = row["pvp_id"] if "pvp_id" in row.keys() else 0
+    if pvp_id:
+        # в матче отказ считается нулевым счётом
+        await db.finish_pvp(pvp_id, callback.from_user.id, 0)
+
     await safe_edit(
         callback.message,
         "\n".join(

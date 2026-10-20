@@ -822,6 +822,20 @@ async def test_daily_pass_batch() -> None:
         )
         await db.db.commit()
 
+        # одиночный расчёт: у кого-то квест положен, у кого-то нет
+        moment = await daily.auto_moment(1)
+        check(moment is not None, "момент автовыдачи посчитан")
+        check(
+            moment is not None and moment.timestamp() <= time.time() + 1,
+            "игроку квест положен - момент в прошлом",
+        )
+        later = await daily.auto_moment(2)
+        check(
+            later is not None and later.timestamp() > time.time(),
+            "у второго игрока квест ещё не положен",
+        )
+        check(await daily.auto_moment(3) is None, "у активного квеста момента нет")
+
         bot = FakeBot()
         issued = await daily.run_daily_pass(bot, max_wait=0)
         check(issued == 1, f"выдан один квест (тому, кому положен): {issued}")

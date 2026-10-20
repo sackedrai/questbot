@@ -59,9 +59,9 @@ jobs:
           DB_PATH: data/questbot.db
           MAX_RUN_MINUTES: '115'
           DROP_PENDING_UPDATES: '0'
-          # Самозапуск следующего прогона - только для публичных репозиториев,
-          # иначе минуты Actions не уложатся в бесплатный лимит
-          DISPATCH_NEXT: ${{ github.event.repository.private == false && '1' || '0' }}
+          # Самозапуск следующего прогона. Ставь 0, если репозиторий приватный:
+          # тогда минуты Actions не уложатся в бесплатный лимит 2000/мес.
+          DISPATCH_NEXT: '1'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python -m bot
 

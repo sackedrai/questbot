@@ -9,7 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 def main_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🎯 Квест дня", callback_data="menu:quest")
-    builder.button(text="⚡ Рискованный квест ×2", callback_data="menu:risk")
+    builder.button(text="⚡ Рискованный ×2", callback_data="menu:risk")
     builder.button(text="⚔️ Вызвать на бой", callback_data="menu:pvp")
     builder.button(text="🏆 Рейтинг", callback_data="menu:top")
     builder.button(text="👤 Профиль", callback_data="menu:profile")
@@ -17,7 +17,7 @@ def main_menu() -> InlineKeyboardMarkup:
     builder.button(text="🔗 Приглашение", callback_data="menu:invite")
     builder.button(text="🧹 Очистить чат", callback_data="menu:clear")
     builder.button(text="ℹ️ Как играть", callback_data="menu:help")
-    builder.adjust(1)
+    builder.adjust(1, 2, 2, 2, 2)
     return builder.as_markup()
 
 def after_quest_menu() -> InlineKeyboardMarkup:

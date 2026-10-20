@@ -67,7 +67,7 @@ class TimelineGame(BaseGame):
                 callback_data=f"g:{quest.id}:{index}",
             )
         builder.adjust(1)
-        add_skip(builder, quest.id)
+        add_skip(builder, quest.id, rows_before=4)
         return Render(text=text, markup=builder.as_markup())
 
     @classmethod

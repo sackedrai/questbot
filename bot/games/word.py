@@ -55,7 +55,7 @@ class WordGame(BaseGame):
             style.note("Отправь одну букву или всё слово целиком"),
         ]
         builder = InlineKeyboardBuilder()
-        add_skip(builder, quest.id)
+        add_skip(builder, quest.id, rows_before=0)
         return Render(
             text="\n".join(lines),
             markup=builder.as_markup(),

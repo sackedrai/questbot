@@ -38,7 +38,7 @@ class FastGame(QuizGame):
         for index, option in enumerate(payload["options"]):
             builder.button(text=option, callback_data=f"g:{quest.id}:{index}")
         builder.adjust(1)
-        add_skip(builder, quest.id)
+        add_skip(builder, quest.id, rows_before=4)
         return Render(
             text="\n".join(
                 [

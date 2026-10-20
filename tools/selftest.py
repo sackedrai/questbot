@@ -119,8 +119,11 @@ async def test_games() -> None:
                   difficulty="medium", payload=payload)
     render = game.render(quest)
     rows = render.markup.inline_keyboard if render.markup else []
-    check(len(rows) == 5 and rows[-1][0].text == "⏭ Сдаться",
-          "викторина: 4 варианта + кнопка сдаться")
+    labels = [b.text for b in rows[-1]] if rows else []
+    check(
+        len(rows) == 5 and "Сдаться" in labels[0] and "меню" in labels[1],
+        f"викторина: 4 варианта + сдаться + в меню: {labels}",
+    )
 
     result = await game.on_choice(quest, str(payload["correct"]))
     check(result.outcome == "solved", "викторина: верный ответ засчитан")
@@ -145,8 +148,11 @@ async def test_games() -> None:
                   difficulty="medium", payload=payload)
     render = timeline.render(quest)
     rows = render.markup.inline_keyboard if render.markup else []
-    check(len(rows) == 5 and rows[-1][0].text == "⏭ Сдаться",
-          "хронология: 4 события + кнопка сдаться")
+    labels = [b.text for b in rows[-1]] if rows else []
+    check(
+        len(rows) == 5 and "Сдаться" in labels[0] and "меню" in labels[1],
+        f"хронология: 4 события + сдаться + в меню: {labels}",
+    )
 
     # неверный выбор — не самое раннее событие
     items = payload["items"]

@@ -44,6 +44,7 @@ async def _settings_markup(tg_id: int) -> tuple[str, InlineKeyboardBuilder]:
         callback_data="set:notify",
     )
     builder.button(text="🎚 Как работает сложность", callback_data="set:difficulty")
+    builder.button(text="🔙 В меню", callback_data="menu:home")
     builder.adjust(1)
     return text, builder
 

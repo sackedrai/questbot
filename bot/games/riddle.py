@@ -44,13 +44,16 @@ class RiddleGame(BaseGame):
             lines += ["", f"💡 {style.note('Подсказка: ' + payload['hint'])}"]
 
         builder = InlineKeyboardBuilder()
-        if not payload.get("hint_used") and payload.get("tries", 0) >= 2:
+        hint_shown = (
+            not payload.get("hint_used") and payload.get("tries", 0) >= 2
+        )
+        if hint_shown:
             builder.button(
                 text=f"💡 Подсказка (штраф ×{HINT_PENALTY})",
                 callback_data=f"g:{quest.id}:hint",
             )
             builder.adjust(1)
-        add_skip(builder, quest.id)
+        add_skip(builder, quest.id, rows_before=1 if hint_shown else 0)
         return Render(
             text="\n".join(lines),
             markup=builder.as_markup(),

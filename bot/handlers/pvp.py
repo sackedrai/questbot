@@ -7,8 +7,10 @@ import json
 from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..db import db
+from ..keyboards import main_menu
 from ..pvp import accept_challenge, create_challenge, format_match, player_name
 from ..services import start_quest
 from .. import style
@@ -25,6 +27,9 @@ async def create_flow(message: Message, bot: Bot) -> None:
     """Создать вызов и отдать ссылку сопернику."""
     code = await create_challenge(message.from_user.id)
     link = await _invite_link(bot, code)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 В меню", callback_data="menu:home")
+    builder.adjust(1)
     await message.answer(
         "\n".join(
             [
@@ -37,7 +42,8 @@ async def create_flow(message: Message, bot: Bot) -> None:
                 style.note(f"Код вызова: {code}"),
                 style.note("Кто наберёт больше очков — победил."),
             ]
-        )
+        ),
+        reply_markup=builder.as_markup(),
     )
 
 

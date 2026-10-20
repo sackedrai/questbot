@@ -120,8 +120,8 @@ async def on_skip(callback: CallbackQuery, state: FSMContext) -> None:
         "\n".join(
             [
                 style.header("⏭", "КВЕСТ ПРОПУЩЕН"),
-                style.note("Ничего страшного - сегодня он оказался не твоим."),
-                style.note("Можно взять новый квест: /quest"),
+                style.note("Ничего страшного — сегодня он оказался не твоим."),
+                style.note("Можно взять новый квест — кнопка ниже."),
             ]
         ),
         main_menu(),

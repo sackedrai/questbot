@@ -82,11 +82,19 @@ class Render:
     detail: str = ""
 
 
-def add_skip(builder: InlineKeyboardBuilder, quest_id: int) -> InlineKeyboardBuilder:
-    """Добавить кнопку отказа от квеста отдельной строкой."""
+def add_skip(
+    builder: InlineKeyboardBuilder, quest_id: int, rows_before: int = 0
+) -> InlineKeyboardBuilder:
+    """Кнопки «Сдаться» и «В меню» одной строкой внизу.
+
+    ``rows_before`` - сколько строк уже занято кнопками игры: ширины
+    задаются списком, иначе последние кнопки съезжают в одну строку
+    вместе с предыдущими.
+    """
     builder.row()
     builder.button(text="⏭ Сдаться", callback_data=f"skip:{quest_id}")
-    builder.adjust(1)
+    builder.button(text="🔙 В меню", callback_data="menu:home")
+    builder.adjust(*([1] * rows_before + [2]))
     return builder
 
 

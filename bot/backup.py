@@ -132,6 +132,9 @@ async def backup_database(
     shutil.copy2(db_path, backup_file)
 
     await _git("add", "--", f"{BACKUP_DIR}/{BACKUP_NAME}", cwd=repo_dir)
+    # на раннере автора может не быть - задаём явно
+    await _git("config", "user.email", "questbot@users.noreply.github.com", cwd=repo_dir)
+    await _git("config", "user.name", "QuestBot", cwd=repo_dir)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     code, out = await _git(
         "commit", "-m", f"backup: база игроков на {stamp}", cwd=repo_dir

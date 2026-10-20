@@ -67,22 +67,59 @@ def _dispatch_next_run() -> None:
     if not (token and repo and workflow):
         return
 
+    # GITHUB_WORKFLOW содержит путь к файлу, а API принимает имя файла
+    # или числовой id - пробуем сначала имя, потом ищем id
+    workflow_id = os.path.basename(workflow)
     url = (
         f"https://api.github.com/repos/{repo}"
-        f"/actions/workflows/{workflow}/dispatches"
+        f"/actions/workflows/{workflow_id}/dispatches"
     )
     payload = json.dumps({"ref": os.getenv("GITHUB_REF_NAME", "main")}).encode()
-    request = urllib.request.Request(url, data=payload, method="POST")
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("Accept", "application/vnd.github+json")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
+
+    def request(target: str) -> int:
+        req = urllib.request.Request(target, data=payload, method="POST")
+        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Accept", "application/vnd.github+json")
+        req.add_header("X-GitHub-Api-Version", "2022-11-28")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                log.info("Следующий прогон запущен (HTTP %s)", response.status)
+                return response.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Не удалось запустить следующий прогон: %r", exc)
+            return 0
+
+    status = request(url)
+    if status == 404:
+        # ищем числовой id по пути к файлу
+        real_id = _workflow_id(repo, workflow, token)
+        if real_id:
+            status = request(
+                f"https://api.github.com/repos/{repo}"
+                f"/actions/workflows/{real_id}/dispatches"
+            )
+    if status not in (200, 201, 204):
+        log.warning("Не удалось запустить следующий прогон: HTTP %s", status)
+
+
+def _workflow_id(repo: str, workflow_path: str, token: str) -> str:
+    """Найти числовой id workflow по его пути."""
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{repo}/actions/workflows"
+    )
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Accept", "application/vnd.github+json")
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            log.info("Следующий прогон запущен (HTTP %s)", response.status)
-    except urllib.error.HTTPError as exc:
-        log.warning("Не удалось запустить следующий прогон: HTTP %s", exc.code)
-    except Exception as exc:
-        log.warning("Не удалось запустить следующий прогон: %r", exc)
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001
+        return ""
+    for item in data.get("workflows", []):
+        if item.get("path", "").endswith(workflow_path.split("/")[-1]):
+            return str(item.get("id", ""))
+    return ""
 
 
 async def _run_polling(dp: Dispatcher, bot: Bot) -> None:

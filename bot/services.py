@@ -17,6 +17,7 @@ from .config import (
     RISK_PENALTY,
 )
 from .db import db, today_iso
+from .daily import STATE_ACTIVE, STATE_COOLDOWN, availability
 from .games import Quest, Render, get_game
 from .scoring import calculate_points, level_for_points
 from . import style
@@ -48,26 +49,28 @@ async def start_quest(tg_id: int, risky: bool) -> QuestStart:
         return QuestStart(text="Сначала пройди регистрацию: /start", blocked=True)
 
     day = today_iso()
-    used = await db.count_quests_today(tg_id, day, risky)
-    limit = BONUS_QUEST_PER_DAY if risky else QUEST_PER_DAY
-    if used >= limit:
-        if risky:
-            return QuestStart(
-                text="\n".join(
-                    [
-                        style.header("⚡", "РИСКОВАННЫЙ КВЕСТ ИСПОЛЬЗОВАН"),
-                        style.note("Сегодняшний рискованный квест уже сыгран."),
-                    ]
-                ),
-                blocked=True,
-            )
+    avail = await availability(tg_id, risky=risky)
+    if avail.state == STATE_ACTIVE:
         return QuestStart(
             text="\n".join(
                 [
-                    style.header("🎯", "КВЕСТ ДНЯ УЖЕ ПРОЙДЕН"),
+                    style.header("⏳", "КВЕСТ ЕЩЁ НЕ ЗАКОНЧЕН"),
+                    style.note("Ответь на него или нажми «Сдаться», чтобы взять новый."),
+                ]
+            ),
+            blocked=True,
+        )
+    if avail.state == STATE_COOLDOWN:
+        return QuestStart(
+            text="\n".join(
+                [
+                    style.header(
+                        "⏳",
+                        "СЛЕДУЮЩИЙ КВЕСТ ЧЕРЕЗ",
+                        avail.human_due() + "  ·  " + avail.human_left(),
+                    ),
                     style.note(
-                        "Но можно взять <b>рискованный</b> квест: "
-                        "×2 очка за успех и −10 очков за провал."
+                        "Следующий квест доступен через 24 часа после прошлого."
                     ),
                 ]
             ),
@@ -75,7 +78,7 @@ async def start_quest(tg_id: int, risky: bool) -> QuestStart:
         )
 
     difficulty = user["difficulty"] or "medium"
-    rng = random.Random(f"{tg_id}:{day}:{used}:{time.time_ns()}")
+    rng = random.Random(f"{tg_id}:{day}:{time.time_ns()}")
     game_type = rng.choice(GAME_TYPES)
     game = get_game(game_type)
 

@@ -184,7 +184,8 @@ async def run_flow(db: Database, game_type: str) -> None:
     # 6. Повторный квест в тот же день заблокирован
     again = FakeMessage("/quest", user)
     await quests.cmd_quest(again, state, fake_bot)
-    check("уже пройден" in again.last_text.lower(), "повторный квест дня заблокирован")
+    check("следующий квест" in again.last_text.lower(),
+          "повторный квест дня заблокирован")
 
     # 7. Рискованный квест доступен
     risk_msg = FakeMessage("/risk", user)
@@ -243,7 +244,8 @@ async def test_failure(db: Database) -> None:
 
     again = FakeMessage("/quest", user)
     await quests.cmd_quest(again, state, fake_bot)
-    check("уже пройден" not in again.last_text.lower(), "после провала квест можно переиграть")
+    check("следующий квест" not in again.last_text.lower(),
+          "после провала квест можно переиграть")
 
 
 async def main() -> None:
@@ -260,6 +262,7 @@ async def main() -> None:
     import bot.handlers.quests as quests_module
     import bot.handlers.ranking as ranking_module
     import bot.services as services_module
+    import bot.daily as daily_module
 
     for module in (
         services_module,
@@ -268,6 +271,7 @@ async def main() -> None:
         profile_module,
         quests_module,
         ranking_module,
+        daily_module,
     ):
         module.db = db
 

@@ -8,6 +8,7 @@ class Onboarding(StatesGroup):
 
     nickname = State()
     difficulty = State()
+    tz = State()
 
 
 class Game(StatesGroup):

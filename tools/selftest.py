@@ -296,9 +296,11 @@ async def test_tracking_session() -> None:
     from bot.net import TrackingSession
     from bot import net as net_module
 
-    db = net_module.db
+    # изолируемся от боевой базы
+    original_db = net_module.db
+    db = Database(":memory:")
     await db.connect()
-    await db.create_user(1, "u", "U")
+    net_module.db = db
 
     original = aiohttp_session.AiohttpSession.make_request
 
@@ -313,11 +315,50 @@ async def test_tracking_session() -> None:
     try:
         session = TrackingSession()
         await session.make_request(None, SendMessage(chat_id=555, text="привет"))
+        tracked = await db.chat_messages(555)
     finally:
         aiohttp_session.AiohttpSession.make_request = original
+        net_module.db = original_db
+        await db.close()
 
-    tracked = await db.chat_messages(555)
-    check(777 in tracked, f"сообщение отслежено: {tracked}")
+    check(tracked == [777], f"сообщение отслежено: {tracked}")
+
+
+async def test_daily_logic() -> None:
+    """Правило: следующий квест - ровно через 24 часа после прошлого."""
+    section("Ежедневная логика")
+
+    import bot.daily as daily
+
+    db = Database(":memory:")
+    await db.connect()
+    daily.db = db
+    await db.create_user(1, "u", "U")
+
+    avail = await daily.availability(1)
+    check(avail.state == "due", f"первый квест доступен сразу: {avail.state}")
+
+    quest_id = await db.create_quest(1, "2026-10-21", "quiz", "easy", {"q": "?"})
+    await db.finish_quest(quest_id, 20, "done")
+
+    avail = await daily.availability(1)
+    check(avail.state == "cooldown",
+          f"после прохождения - кулдаун: {avail.state}")
+    check(abs(avail.seconds_left - 86400) < 120,
+          f"осталось примерно 24 часа: {avail.seconds_left} сек")
+    check("24 ч" in avail.human_left() or "23 ч" in avail.human_left(),
+          f"человекообразно: {avail.human_left()}")
+
+    await db.set_tz(1, 5)
+    avail = await daily.availability(1)
+    check(avail.tz_offset == 5, f"часовой пояс сохранён: {avail.tz_offset}")
+
+    # незаконченный квест блокирует выдачу
+    await db.create_quest(1, "2026-10-21", "quiz", "easy", {"q": "?"})
+    avail = await daily.availability(1)
+    check(avail.state == "active",
+          f"незаконченный квест блокирует: {avail.state}")
+
     await db.close()
 
 
@@ -330,6 +371,7 @@ async def main() -> None:
     await test_games()
     await test_database()
     await test_tracking_session()
+    await test_daily_logic()
 
     print("\n" + "=" * 56)
     print(f"  Пройдено: {PASSED}   Провалено: {FAILED}")

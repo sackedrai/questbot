@@ -19,6 +19,18 @@ from ..utils import cleanup_chat, safe_edit, wipe_chat
 
 router = Router()
 
+# Часовые пояса на выбор: (название, смещение в часах от UTC)
+TZ_CHOICES: tuple[tuple[str, int], ...] = (
+    ("Калининград", 2),
+    ("Москва", 3),
+    ("Самара", 4),
+    ("Екатеринбург", 5),
+    ("Омск", 6),
+    ("Красноярск", 7),
+    ("Иркутск", 8),
+    ("Владивосток", 10),
+)
+
 HELP_TEXT = "\n".join(
     [
         style.header("📖", "КАК ИГРАТЬ", "коротко о главном"),
@@ -39,9 +51,12 @@ HELP_TEXT = "\n".join(
         "/top          рейтинг\n"
         "/profile      профиль\n"
         "/difficulty  сменить сложность\n"
+        "/tz           часовой пояс\n"
         "/clear        очистить чат полностью\n"
         "/help         эта справка</pre>",
         "",
+        style.note("Следующий квест приходит через 24 часа после прошлого - "
+                   "в то же самое время."),
         style.note("Кнопка «Сдаться» — если квест оказался не по силам. "
                    "Без штрафа, можно взять новый."),
         style.note("/clear — удалит всю переписку в чате, включая твои сообщения."),
@@ -154,6 +169,82 @@ async def cmd_difficulty(message: Message) -> None:
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
     await message.answer(HELP_TEXT, reply_markup=main_menu())
+
+
+@router.message(Command("tz"))
+async def cmd_tz(message: Message) -> None:
+    """Выбрать часовой пояс - от него зависит время выдачи квеста."""
+    builder = InlineKeyboardBuilder()
+    for title, offset in TZ_CHOICES:
+        builder.button(text=f"{title}  UTC+{offset}", callback_data=f"tz:{offset}")
+    builder.button(text="Другой — напишу сам", callback_data="tz:custom")
+    builder.adjust(2)
+    await message.answer(
+        "\n".join(
+            [
+                style.header("🕐", "ЧАСОВОЙ ПОЯС", "время выдачи ежедневного квеста"),
+                style.note("По умолчанию Москва (UTC+3)."),
+            ]
+        ),
+        reply_markup=builder.as_markup(),
+    )
+
+
+@router.callback_query(F.data.startswith("tz:"))
+async def on_tz(callback: CallbackQuery, state: FSMContext) -> None:
+    value = callback.data.split(":", 1)[1]
+    if value == "custom":
+        await state.set_state(Onboarding.tz)
+        await safe_edit(
+            callback.message,
+            "\n".join(
+                [
+                    style.header("🕐", "СВОЙ ЧАСОВОЙ ПОЯС"),
+                    style.note("Напиши смещение в часах от UTC. Например: 3 или -5."),
+                ]
+            ),
+        )
+        await callback.answer()
+        return
+
+    offset = int(value)
+    await db.set_tz(callback.from_user.id, offset)
+    await state.clear()
+    await safe_edit(
+        callback.message,
+        "\n".join(
+            [
+                style.header("✅", "ЧАСОВОЙ ПОЯС СОХРАНЁН"),
+                style.note(f"Теперь квест приходит в твоё {offset:+d}:00."),
+            ]
+        ),
+        main_menu(),
+    )
+    await callback.answer()
+
+
+@router.message(Onboarding.tz, F.text)
+async def on_tz_custom(message: Message, state: FSMContext) -> None:
+    raw = message.text.strip().replace(",", ".")
+    try:
+        offset = int(float(raw))
+    except ValueError:
+        await message.answer(style.note("Нужно число. Например: 3 или -5."))
+        return
+    if not -12 <= offset <= 14:
+        await message.answer(style.note("Смещение должно быть от -12 до 14."))
+        return
+    await db.set_tz(message.from_user.id, offset)
+    await state.clear()
+    await message.answer(
+        "\n".join(
+            [
+                style.header("✅", "ЧАСОВОЙ ПОЯС СОХРАНЁН"),
+                style.note(f"Теперь квест приходит в твоё {offset:+d}:00."),
+            ]
+        ),
+        reply_markup=main_menu(),
+    )
 
 
 @router.message(Command("clear"))

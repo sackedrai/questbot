@@ -128,9 +128,11 @@ async def main() -> None:
     import bot.handlers.quests as quests_module
     import bot.handlers.ranking as ranking_module
     import bot.services as services_module
+    import bot.daily as daily_module
 
     for module in (services_module, common_module, games_module,
-                   profile_module, quests_module, ranking_module):
+                   profile_module, quests_module, ranking_module,
+                   daily_module):
         module.db = db
 
     session = MockSession()
@@ -194,19 +196,22 @@ async def main() -> None:
     check(qrow["status"] == "done", f"квест закрыт со статусом done: {qrow['status']}")
 
     # --- 5. полный цикл текстовой игры через диспетчер ---
-    # /quest -> бот выдаёт загадку и ставит состояние -> игрок пишет ответ
+    # отдельный игрок: у 555 уже есть пройденный квест, значит кулдаун 24ч
     import bot.services as services_module
 
     services_module.GAME_TYPES = ("riddle",)
     session.calls.clear()
 
+    fresh_user = User(id=556, is_bot=False, first_name="Другой")
+    fresh_chat = Chat(id=556, type="private")
+    await db.create_user(556, "other", "Другой")
     msg_q = Message(message_id=10, date=datetime.now(timezone.utc),
-                    chat=chat, from_user=user, text="/quest")
+                    chat=fresh_chat, from_user=fresh_user, text="/quest")
     await dp.feed_update(bot, Update(update_id=10, message=msg_q))
     check("SendMessage" in session.method_names(),
           f"/quest отработал через диспетчер: {session.method_names()}")
 
-    active = await db.get_active_quest(555)
+    active = await db.get_active_quest(556)
     check(active is not None, "загадка выдана и сохранена в базе")
     if active is not None:
         import json
@@ -214,13 +219,22 @@ async def main() -> None:
         payload = json.loads(active["payload"])
         session.calls.clear()
         msg_a = Message(message_id=11, date=datetime.now(timezone.utc),
-                        chat=chat, from_user=user, text=payload["answers"][0])
+                        chat=fresh_chat, from_user=fresh_user,
+                        text=payload["answers"][0])
         await dp.feed_update(bot, Update(update_id=11, message=msg_a))
         qrow = await db.get_quest(active["id"])
         check(qrow["status"] == "done",
               f"текстовый ответ засчитан: {qrow['status']}")
         check("SendMessage" in session.method_names(),
               f"бот ответил на ответ: {session.method_names()}")
+
+        # после прохождения квест недоступен 24 часа
+        session.calls.clear()
+        msg_q2 = Message(message_id=12, date=datetime.now(timezone.utc),
+                         chat=fresh_chat, from_user=fresh_user, text="/quest")
+        await dp.feed_update(bot, Update(update_id=12, message=msg_q2))
+        check("SendMessage" in session.method_names(),
+              "после прохождения квест закрыт на 24 часа")
 
     # --- 6. отказ от квеста ---
     await db.create_user(555, "u", "U")

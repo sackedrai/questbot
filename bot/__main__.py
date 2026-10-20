@@ -169,12 +169,40 @@ async def main() -> None:
             _report_network_problem(exc, channel.description)
             return
         log.info("Бот запущен, жду сообщений…")
-        await _run_polling(dp, bot)
+
+        # выдаём квесты тем, кому положено (и ждём, если срок скоро)
+        max_run = float(os.getenv("MAX_RUN_MINUTES", "0") or 0)
+        daily_task = asyncio.create_task(_daily_pass(bot, max_run))
+        try:
+            await dp.start_polling(bot)
+        finally:
+            daily_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await daily_task
     finally:
         await bot.session.close()
         await db.close()
 
     _dispatch_next_run()
+
+
+async def _daily_pass(bot: Bot, max_run_minutes: float) -> None:
+    """Раздать ежедневные квесты.
+
+    Если квест положен скоро (в пределах времени работы прогона), бот
+    дождётся нужного момента и отправит его ровно в срок.
+    """
+    from .daily import run_daily_pass
+
+    max_wait = max(0.0, (max_run_minutes - 5) * 60) if max_run_minutes else 0.0
+    try:
+        issued = await run_daily_pass(bot, max_wait=max_wait)
+        if issued:
+            log.info("Ежедневных квестов выдано: %s", issued)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Не удалось раздать ежедневные квесты: %r", exc)
 
 
 if __name__ == "__main__":

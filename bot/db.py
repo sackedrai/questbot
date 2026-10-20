@@ -58,6 +58,13 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages (chat_id, id);
 """
 
+# Новые колонки, которые добавляются к уже существующим таблицам.
+MIGRATIONS: dict[str, list[tuple[str, str]]] = {
+    "users": [
+        ("tz_offset", "INTEGER DEFAULT 3"),
+    ],
+}
+
 
 def today_iso() -> str:
     return date.today().isoformat()
@@ -85,7 +92,20 @@ class Database:
         self._db = await aiosqlite.connect(self.path)
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(SCHEMA)
+        await self._migrate()
         await self._db.commit()
+
+    async def _migrate(self) -> None:
+        """Добавить недостающие колонки в существующие таблицы."""
+        for table, columns in MIGRATIONS.items():
+            async with self.db.execute(f"PRAGMA table_info({table})") as cur:
+                existing = {row["name"] for row in await cur.fetchall()}
+            for name, ddl in columns:
+                if name not in existing:
+                    await self.db.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"
+                    )
+        await self.db.commit()
 
     async def close(self) -> None:
         if self._db is not None:
@@ -245,6 +265,36 @@ class Database:
         ) as cur:
             row = await cur.fetchone()
         return int(row["c"])
+
+    async def all_users(self) -> list[aiosqlite.Row]:
+        """Все зарегистрированные игроки."""
+        async with self.db.execute("SELECT * FROM users") as cur:
+            return list(await cur.fetchall())
+
+    async def set_tz(self, tg_id: int, offset: int) -> None:
+        """Часовой пояс игрока (смещение в часах от UTC)."""
+        await self.db.execute(
+            "UPDATE users SET tz_offset = ? WHERE tg_id = ?", (offset, tg_id)
+        )
+        await self.db.commit()
+
+    async def last_done_at(self, tg_id: int, risky: bool = False) -> Optional[float]:
+        """Время последнего успешно пройденного квеста (unix ts)."""
+        async with self.db.execute(
+            "SELECT MAX(finished_at) AS t FROM quests"
+            " WHERE tg_id = ? AND status = 'done' AND risky = ?",
+            (tg_id, 1 if risky else 0),
+        ) as cur:
+            row = await cur.fetchone()
+        return row["t"] if row and row["t"] else None
+
+    async def last_issued_at(self, tg_id: int) -> Optional[float]:
+        """Когда игроку последний раз выдавали квест (любой)."""
+        async with self.db.execute(
+            "SELECT MAX(created_at) AS t FROM quests WHERE tg_id = ?", (tg_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return row["t"] if row and row["t"] else None
 
     async def best_day_points(self, tg_id: int) -> int:
         """Лучший день игрока по сумме очков."""

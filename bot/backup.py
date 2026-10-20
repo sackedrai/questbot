@@ -21,9 +21,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
-import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,14 +29,9 @@ from typing import Optional
 
 BACKUP_DIR = "backup"
 BACKUP_NAME = "questbot.db.enc"
-PLAIN_NAME = "questbot.db"
 
 # Как часто коммитить бэкап (часов)
 BACKUP_INTERVAL_HOURS = 4.0
-
-
-class BackupError(RuntimeError):
-    """Не удалось сделать бэкап."""
 
 
 def get_key() -> Optional[bytes]:

@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from ..db import db
+from ..keyboards import main_menu
 from ..services import start_quest
 from ..states import Game
 from ..utils import open_screen
@@ -20,7 +21,7 @@ async def _give_quest(
 ) -> None:
     result = await start_quest(message.from_user.id, risky=risky)
     if result.blocked:
-        await message.answer(result.text)
+        await message.answer(result.text, reply_markup=main_menu())
         return
 
     if result.needs_input:

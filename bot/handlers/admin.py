@@ -18,7 +18,7 @@ from .. import admin as admin_mod
 from .. import style
 from ..achievements import ACHIEVEMENTS
 from ..db import db
-from ..keyboards import main_menu
+from ..keyboards import admin_menu, main_menu
 from ..states import AdminPanel
 
 router = Router()
@@ -35,18 +35,8 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
     if not admin_mod.is_admin(message.from_user.id):
         await message.answer(_denied())
         return
-    from ..keyboards import admin_menu
 
-    await message.answer(
-        "\n".join(
-            [
-                style.header("🛠", "АДМИНКА", "всё управление ботом здесь"),
-                style.note("Выбери раздел:"),
-                style.footer(),
-            ]
-        ),
-        reply_markup=admin_menu(),
-    )
+    await message.answer(await _admin_home_text(), reply_markup=admin_menu())
 
 
 @router.message(Command("stats"))
@@ -55,7 +45,9 @@ async def cmd_stats(message: Message) -> None:
     if not admin_mod.is_admin(message.from_user.id):
         await message.answer(_denied())
         return
-    await message.answer(await admin_mod.build_stats_text())
+    await message.answer(
+        await admin_mod.build_stats_text(), reply_markup=admin_menu()
+    )
 
 
 @router.message(Command("players"))
@@ -64,7 +56,9 @@ async def cmd_players(message: Message) -> None:
     if not admin_mod.is_admin(message.from_user.id):
         await message.answer(_denied())
         return
-    await message.answer(await admin_mod.build_players_text())
+    await message.answer(
+        await admin_mod.build_players_text(), reply_markup=admin_menu()
+    )
 
 
 @router.callback_query(F.data.startswith("adm:"))
@@ -78,9 +72,9 @@ async def on_admin(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None
     await callback.answer()
 
     if action == "stats":
-        await _edit(callback, await admin_mod.build_stats_text())
+        await _edit(callback, await admin_mod.build_stats_text(), admin_menu())
     elif action == "players":
-        await _edit(callback, await admin_mod.build_players_text())
+        await _edit(callback, await admin_mod.build_players_text(), admin_menu())
     elif action == "fix":
         await _edit(callback, await _players_picker(), await _players_markup())
     elif action.startswith("user:"):
@@ -112,8 +106,13 @@ async def on_admin(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None
             BufferedInputFile(data, filename="players.csv"),
             caption="Выгрузка игроков",
         )
+        # отдельное сообщение с кнопками: документ живёт своей жизнью
+        await callback.message.answer(
+            style.note("Выгрузка отправлена выше."),
+            reply_markup=admin_menu(),
+        )
     elif action == "vacuum":
-        await _edit(callback, await admin_mod.vacuum())
+        await _edit(callback, await admin_mod.vacuum(), admin_menu())
     elif action == "broadcast":
         await state.set_state(AdminPanel.broadcast)
         await _edit(
@@ -121,10 +120,16 @@ async def on_admin(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None
             "\n".join(
                 [
                     style.header("📣", "ОБЪЯВЛЕНИЕ", "напиши текст - разошлём всем"),
-                    style.note("Отмена: /cancel"),
+                    style.note("Можно отменить кнопкой ниже или командой /cancel"),
                 ]
             ),
+            _cancel_markup(),
         )
+    elif action == "back":
+        await _edit(callback, await _admin_home_text(), admin_menu())
+    elif action == "cancel":
+        await state.clear()
+        await _edit(callback, "Отменено.", admin_menu())
     elif action == "menu":
         await _edit(callback, "Меню админки закрыто.", main_menu())
 
@@ -159,6 +164,25 @@ async def on_cancel(message: Message) -> None:
     if not admin_mod.is_admin(message.from_user.id):
         return
     await message.answer("Отменено.", reply_markup=main_menu())
+
+
+def _cancel_markup() -> InlineKeyboardMarkup:
+    """Кнопка отмены (объявление, ввод текста)."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔙 Отмена", callback_data="adm:cancel")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+async def _admin_home_text() -> str:
+    """Текст главного экрана админки."""
+    return "\n".join(
+        [
+            style.header("🛠", "АДМИНКА", "всё управление ботом здесь"),
+            style.note("Выбери раздел:"),
+            style.footer(),
+        ]
+    )
 
 
 async def _edit(
@@ -200,7 +224,7 @@ async def _players_markup() -> InlineKeyboardMarkup:
             text=f"{name[:18]} · {user['points']} очк",
             callback_data=f"adm:user:{user['tg_id']}",
         )
-    builder.button(text="🔙 В меню", callback_data="adm:menu")
+    builder.button(text="🔙 В админку", callback_data="adm:back")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -212,7 +236,7 @@ def _player_actions(tg_id: int) -> InlineKeyboardMarkup:
     builder.button(text="➕ 50 очков", callback_data=f"adm:plus:{tg_id}")
     builder.button(text="➖ 50 очков", callback_data=f"adm:minus:{tg_id}")
     builder.button(text="🏅 Выдать достижение", callback_data=f"adm:grant:{tg_id}")
-    builder.button(text="🔙 В меню", callback_data="adm:menu")
+    builder.button(text="🔙 В админку", callback_data="adm:back")
     builder.adjust(2, 2, 1)
     return builder.as_markup()
 

@@ -364,6 +364,22 @@ async def main() -> None:
         bool(sent_adm) and "СТАТИСТИКА" in sent_adm[-1].text,
         f"админу показали статистику: {sent_adm[-1].text[:60] if sent_adm else None}",
     )
+    check(
+        bool(sent_adm) and sent_adm[-1].reply_markup is not None,
+        "у статистики есть кнопки - есть куда уйти",
+    )
+
+    # из админки по кнопкам тоже должен быть выход
+    session.calls.clear()
+    msg_players = Message(message_id=52, date=datetime.now(timezone.utc),
+                          chat=chat, from_user=user, text="/players")
+    await dp.feed_update(bot, Update(update_id=52, message=msg_players))
+    sent_players = [c for c in session.calls if isinstance(c, SendMessage)]
+    check(
+        bool(sent_players) and sent_players[-1].reply_markup is not None,
+        "у списка игроков есть кнопки",
+    )
+
     admin_module.ADMIN_CHAT_ID = old_admin
 
     # --- 9. повторное нажатие той же кнопки не плодит сообщения ---

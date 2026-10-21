@@ -139,7 +139,10 @@ async def on_game_text(message: Message, state: FSMContext) -> None:
         row = await db.get_active_quest(message.from_user.id)
     if row is None or row["status"] != "active":
         await state.clear()
-        await message.answer("Активного квеста нет. Нажми «Квест дня».")
+        await message.answer(
+            "Активного квеста нет. Нажми «Квест дня».",
+            reply_markup=main_menu(),
+        )
         return
 
     quest = Quest.from_row(row)

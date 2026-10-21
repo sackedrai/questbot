@@ -203,7 +203,8 @@ async def cmd_tz(message: Message, bot: Bot) -> None:
     for title, offset in TZ_CHOICES:
         builder.button(text=f"{title}  UTC+{offset}", callback_data=f"tz:{offset}")
     builder.button(text="Другой — напишу сам", callback_data="tz:custom")
-    builder.adjust(2)
+    builder.button(text="🔙 В меню", callback_data="menu:home")
+    builder.adjust(2, 1)
     await open_screen(
         bot,
         message,
@@ -223,6 +224,9 @@ async def on_tz(callback: CallbackQuery, state: FSMContext) -> None:
     value = callback.data.split(":", 1)[1]
     if value == "custom":
         await state.set_state(Onboarding.tz)
+        cancel = InlineKeyboardBuilder()
+        cancel.button(text="🔙 В меню", callback_data="menu:home")
+        cancel.adjust(1)
         await safe_edit(
             callback.message,
             "\n".join(
@@ -231,6 +235,7 @@ async def on_tz(callback: CallbackQuery, state: FSMContext) -> None:
                     style.note("Напиши смещение в часах от UTC. Например: 3 или -5."),
                 ]
             ),
+            cancel.as_markup(),
         )
         await callback.answer()
         return
@@ -257,10 +262,16 @@ async def on_tz_custom(message: Message, state: FSMContext, bot: Bot) -> None:
     try:
         offset = int(float(raw))
     except ValueError:
-        await message.answer(style.note("Нужно число. Например: 3 или -5."))
+        await message.answer(
+            style.note("Нужно число. Например: 3 или -5."),
+            reply_markup=main_menu(),
+        )
         return
     if not -12 <= offset <= 14:
-        await message.answer(style.note("Смещение должно быть от -12 до 14."))
+        await message.answer(
+            style.note("Смещение должно быть от -12 до 14."),
+            reply_markup=main_menu(),
+        )
         return
     await db.set_tz(message.from_user.id, offset)
     await state.clear()

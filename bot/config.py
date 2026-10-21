@@ -13,6 +13,10 @@ load_dotenv(BASE_DIR / ".env")
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "").strip()
 DB_PATH: str = os.getenv("DB_PATH", str(BASE_DIR / "data" / "questbot.db"))
 
+# Кто может пользоваться админ-разделом бота (tg_id владельца).
+# Пусто - админки нет, никто не сможет ею воспользоваться.
+ADMIN_CHAT_ID: str = os.getenv("ADMIN_CHAT_ID", "").strip()
+
 # Прокси для Telegram, если api.telegram.org недоступен напрямую.
 # Примеры: socks5://user:pass@host:1080  или  http://host:8080
 PROXY_URL: str = os.getenv("PROXY_URL", "").strip()

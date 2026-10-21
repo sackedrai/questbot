@@ -144,6 +144,7 @@ async def main() -> None:
     import bot.selfcheck as selfcheck_module
     import bot.middleware as middleware_module
     import bot.achievements as achievements_module
+    import bot.admin as admin_module
     import bot.handlers.pvp as pvp_handlers_module
     import bot.handlers.settings as settings_handlers_module
 
@@ -152,7 +153,7 @@ async def main() -> None:
                    daily_module, adaptive_module, pvp_module,
                    selfcheck_module, middleware_module,
                    pvp_handlers_module, settings_handlers_module,
-                   achievements_module):
+                   achievements_module, admin_module):
         module.db = db
 
     session = MockSession()
@@ -337,6 +338,33 @@ async def main() -> None:
     check(40 in deleted,
           f"прошлый экран удалён при возврате в меню: {sorted(deleted)[:8]}")
     check(41 not in deleted, f"само меню осталось: {sorted(deleted)[:8]}")
+
+    # --- 8.2. админка: обычному игроку нельзя, админу можно ---
+    import bot.admin as admin_module
+
+    old_admin = admin_module.ADMIN_CHAT_ID
+    admin_module.ADMIN_CHAT_ID = ""
+    session.calls.clear()
+    msg_usr = Message(message_id=50, date=datetime.now(timezone.utc),
+                      chat=chat, from_user=user, text="/admin")
+    await dp.feed_update(bot, Update(update_id=50, message=msg_usr))
+    sent_usr = [c for c in session.calls if isinstance(c, SendMessage)]
+    check(
+        bool(sent_usr) and "Неизвестная команда" in sent_usr[-1].text,
+        f"обычному игроку отказали: {sent_usr[-1].text[:60] if sent_usr else None}",
+    )
+
+    admin_module.ADMIN_CHAT_ID = "555"
+    session.calls.clear()
+    msg_adm = Message(message_id=51, date=datetime.now(timezone.utc),
+                      chat=chat, from_user=user, text="/stats")
+    await dp.feed_update(bot, Update(update_id=51, message=msg_adm))
+    sent_adm = [c for c in session.calls if isinstance(c, SendMessage)]
+    check(
+        bool(sent_adm) and "СТАТИСТИКА" in sent_adm[-1].text,
+        f"админу показали статистику: {sent_adm[-1].text[:60] if sent_adm else None}",
+    )
+    admin_module.ADMIN_CHAT_ID = old_admin
 
     # --- 9. повторное нажатие той же кнопки не плодит сообщения ---
     session.calls.clear()

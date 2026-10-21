@@ -1315,6 +1315,92 @@ def test_greeting() -> None:
     check("ночи" in greeting_for(2), f"ночью - ночь: {greeting_for(2)}")
 
 
+async def test_admin_panel() -> None:
+    """Админ-раздел: доступ, статистика, починка, объявление."""
+    section("Админка")
+
+    import bot.admin as admin_module
+    from bot.admin import (
+        build_player_card,
+        build_players_text,
+        build_stats_text,
+        change_points,
+        grant_achievement,
+        is_admin,
+        players_csv_bytes,
+        reset_player,
+        vacuum,
+    )
+
+    db = Database(":memory:")
+    await db.connect()
+    admin_module.db = db
+
+    class FakeBot:
+        def __init__(self) -> None:
+            self.sent: list[int] = []
+
+        async def send_message(self, chat_id: int, text: str, **kwargs) -> None:
+            self.sent.append(chat_id)
+
+    old_admin = admin_module.ADMIN_CHAT_ID
+    admin_module.ADMIN_CHAT_ID = "555"
+    try:
+        check(is_admin(555), "владелец - админ")
+        check(not is_admin(556), "остальные - не админы")
+        admin_module.ADMIN_CHAT_ID = ""
+        check(not is_admin(555), "без секрета админка закрыта")
+
+        admin_module.ADMIN_CHAT_ID = "555"
+        await db.create_user(555)
+        await db.set_nickname(555, "Тест")
+        await db.db.execute(
+            "UPDATE users SET points = 300, quests_done = 10, correct = 8,"
+            " wrong = 2, streak = 5, best_streak = 6,"
+            " last_quest_day = '2026-10-21' WHERE tg_id = 555"
+        )
+        await db.db.commit()
+
+        stats = await build_stats_text()
+        check("СТАТИСТИКА" in stats, "есть заголовок статистики")
+        check("Активны сегодня" in stats, "есть активные за сегодня")
+        check("80%" in stats, f"средняя точность посчитана: {stats[:200]}")
+
+        players = await build_players_text()
+        check("ИГРОКИ" in players, "есть список игроков")
+        check("Тест" in players, "игрок в списке")
+
+        card = await build_player_card(555)
+        check("Очки" in card and "300" in card, f"карточка игрока: {card[:120]}")
+
+        await reset_player(555)
+        user = await db.get_user(555)
+        check(user["streak"] == 0, f"серия сброшена: {user['streak']}")
+
+        await change_points(555, 50)
+        user = await db.get_user(555)
+        check(user["points"] == 350, f"очки начислены: {user['points']}")
+
+        await grant_achievement(555, "first_quest")
+        earned = await db.earned_achievements(555)
+        check("first_quest" in earned, f"достижение выдано: {earned}")
+
+        bot = FakeBot()
+        sent, total = await admin_module.broadcast(bot, "Тестовое объявление")
+        check(sent == 1 and total == 1, f"объявление разослано: {sent} из {total}")
+        check(bot.sent == [555], f"получил админ: {bot.sent}")
+
+        data = await players_csv_bytes()
+        check(b"tg_id" in data, "CSV с заголовком")
+        check(b"555" in data, "CSV со списком игроков")
+
+        note = await vacuum(0)
+        check("Убрано" in note, f"уборка отработала: {note}")
+    finally:
+        admin_module.ADMIN_CHAT_ID = old_admin
+        await db.close()
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -1337,6 +1423,7 @@ async def main() -> None:
     await test_pvp_rotator()
     await test_achievements()
     await test_achievements_screen()
+    await test_admin_panel()
     await test_error_handler()
     await test_migration_old_db()
     await test_backup()

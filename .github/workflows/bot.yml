@@ -64,6 +64,8 @@ jobs:
         timeout-minutes: 150
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          # Кто может заходить в админ-раздел бота (tg_id владельца).
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           # Ключ шифрования бэкапа базы. Без него бот не будет коммитить
           # базу в репозиторий (данные не должны утекать в открытый git).
           BACKUP_KEY: ${{ secrets.BACKUP_KEY }}

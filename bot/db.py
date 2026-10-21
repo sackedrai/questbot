@@ -570,6 +570,77 @@ class Database:
         await self.db.commit()
 
     # ------------------------------------------------------------------
+    # админка
+    # ------------------------------------------------------------------
+    async def stats_overview(self) -> dict[str, Any]:
+        """Сводка для админки: игроки, активные сегодня, средняя точность."""
+        today = today_iso()
+        async with self.db.execute("SELECT COUNT(*) AS c FROM users") as cur:
+            total = int((await cur.fetchone())["c"])
+        async with self.db.execute(
+            "SELECT COUNT(*) AS c FROM users WHERE last_quest_day = ?", (today,)
+        ) as cur:
+            active = int((await cur.fetchone())["c"])
+        async with self.db.execute(
+            "SELECT AVG(1.0 * correct / quests_done) AS a FROM users"
+            " WHERE quests_done > 0"
+        ) as cur:
+            row = await cur.fetchone()
+        accuracy = row["a"] if row and row["a"] is not None else 0.0
+        async with self.db.execute(
+            "SELECT COUNT(*) AS c FROM quests WHERE status = 'done'"
+        ) as cur:
+            done_total = int((await cur.fetchone())["c"])
+        return {
+            "total": total,
+            "active_today": active,
+            "accuracy": round(100 * float(accuracy)),
+            "quests_done": done_total,
+        }
+
+    async def reset_streak(self, tg_id: int) -> bool:
+        """Сбросить серию игрока (для починки)."""
+        cur = await self.db.execute(
+            "UPDATE users SET streak = 0, last_quest_day = '' WHERE tg_id = ?",
+            (tg_id,),
+        )
+        await self.db.commit()
+        return bool(cur.rowcount)
+
+    async def add_points_admin(self, tg_id: int, delta: int) -> bool:
+        """Начислить или списать очки игроку."""
+        cur = await self.db.execute(
+            "UPDATE users SET points = MAX(0, points + ?) WHERE tg_id = ?",
+            (delta, tg_id),
+        )
+        await self.db.commit()
+        return bool(cur.rowcount)
+
+    async def vacuum_old(self, days: int = 90) -> dict[str, int]:
+        """Вычистить старые записи. Возвращает, сколько чего удалено."""
+        cutoff = time.time() - days * 86400
+        result: dict[str, int] = {}
+
+        cur = await self.db.execute(
+            "DELETE FROM quests WHERE status != 'active' AND started_at < ?",
+            (cutoff,),
+        )
+        result["quests"] = cur.rowcount or 0
+
+        cur = await self.db.execute(
+            "DELETE FROM pvp_matches WHERE created_at < ?", (cutoff,)
+        )
+        result["pvp"] = cur.rowcount or 0
+
+        cur = await self.db.execute(
+            "DELETE FROM messages WHERE created_at < ?", (cutoff,)
+        )
+        result["messages"] = cur.rowcount or 0
+
+        await self.db.commit()
+        return result
+
+    # ------------------------------------------------------------------
     # сообщения (для очистки чата)
     # ------------------------------------------------------------------
     async def track_message(

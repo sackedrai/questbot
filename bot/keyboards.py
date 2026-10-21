@@ -32,6 +32,20 @@ def after_quest_menu() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def admin_menu() -> InlineKeyboardMarkup:
+    """Меню админ-раздела."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📊 Статистика", callback_data="adm:stats")
+    builder.button(text="👥 Игроки", callback_data="adm:players")
+    builder.button(text="🛠 Починить игрока", callback_data="adm:fix")
+    builder.button(text="📣 Объявление", callback_data="adm:broadcast")
+    builder.button(text="📤 Выгрузка CSV", callback_data="adm:export")
+    builder.button(text="🧹 Уборка базы", callback_data="adm:vacuum")
+    builder.button(text="🔙 В меню", callback_data="menu:home")
+    builder.adjust(2, 2, 2, 1)
+    return builder.as_markup()
+
+
 def top_menu(active_scope: str = "all") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     scopes = (

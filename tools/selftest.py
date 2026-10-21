@@ -844,6 +844,76 @@ async def test_daily_pass_batch() -> None:
         await db.close()
 
 
+async def test_migration_old_db() -> None:
+    """Старая база без новых колонок должна открываться.
+
+    Регрессия: индекс по новой колонке в SCHEMA ломал старые базы - бот
+    падал при старте и при этом не завершался (висел поток aiosqlite).
+    """
+    section("Миграция старой базы")
+
+    import sqlite3
+    import tempfile
+
+    import bot.db as db_module
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "old.db"
+        con = sqlite3.connect(str(path))
+        con.executescript(
+            """
+            CREATE TABLE users (
+                tg_id INTEGER PRIMARY KEY, nickname TEXT, points INTEGER DEFAULT 0
+            );
+            CREATE TABLE quests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER NOT NULL,
+                day TEXT NOT NULL,
+                game_type TEXT NOT NULL,
+                difficulty TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                points INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                risky INTEGER DEFAULT 0,
+                started_at REAL DEFAULT 0,
+                finished_at REAL DEFAULT 0
+            );
+            INSERT INTO users (tg_id, nickname) VALUES (5, 'Старый игрок');
+            """
+        )
+        con.commit()
+        con.close()
+
+        db = Database(str(path))
+        await db.connect()
+        try:
+            cur = await db.db.execute("PRAGMA table_info(quests)")
+            cols = {row["name"] for row in await cur.fetchall()}
+            check("item_key" in cols, "колонка item_key добавлена миграцией")
+            cur = await db.db.execute("PRAGMA index_list(quests)")
+            indexes = {row["name"] for row in await cur.fetchall()}
+            check("idx_quests_user_key" in indexes, "индекс по item_key создан")
+            user = await db.get_user(5)
+            check(
+                user is not None and user["nickname"] == "Старый игрок",
+                "старые данные на месте",
+            )
+        finally:
+            await db.close()
+
+    # при ошибке схемы соединение должно закрываться, иначе процесс зависнет
+    original = db_module.SCHEMA
+    db_module.SCHEMA = original + "CREATE INDEX broken ON quests (нет_такой_колонки);"
+    bad = Database(":memory:")
+    try:
+        await bad.connect()
+        check(False, "ожидалась ошибка схемы")
+    except Exception:
+        check(bad._db is None, "после ошибки соединение закрыто")
+    finally:
+        db_module.SCHEMA = original
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -858,6 +928,7 @@ async def main() -> None:
     await test_rotator()
     await test_novice_level()
     await test_daily_pass_batch()
+    await test_migration_old_db()
     await test_backup()
     test_watchdog_logic()
     await test_error_counter()

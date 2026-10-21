@@ -47,7 +47,6 @@ CREATE TABLE IF NOT EXISTS quests (
 CREATE INDEX IF NOT EXISTS idx_quests_user_day ON quests (tg_id, day);
 CREATE INDEX IF NOT EXISTS idx_quests_day       ON quests (day);
 CREATE INDEX IF NOT EXISTS idx_quests_status    ON quests (status);
-CREATE INDEX IF NOT EXISTS idx_quests_user_key  ON quests (tg_id, item_key);
 
 CREATE TABLE IF NOT EXISTS messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,9 +122,16 @@ class Database:
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(self.path)
         self._db.row_factory = aiosqlite.Row
-        await self._db.executescript(SCHEMA)
-        await self._migrate()
-        await self._db.commit()
+        try:
+            await self._db.executescript(SCHEMA)
+            await self._migrate()
+            await self._db.commit()
+        except Exception:
+            # Не оставляем висящее соединение: поток aiosqlite держит
+            # процесс, и вместо падения бот "зависает" до конца прогона.
+            await self._db.close()
+            self._db = None
+            raise
 
     async def _migrate(self) -> None:
         """Добавить недостающие колонки в существующие таблицы."""
@@ -137,6 +143,12 @@ class Database:
                     await self.db.execute(
                         f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"
                     )
+        # Индексы по новым колонкам создаём после миграции: в SCHEMA они бы
+        # ломали старые базы, где колонки ещё нет.
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_quests_user_key"
+            " ON quests (tg_id, item_key)"
+        )
         await self.db.commit()
 
     async def close(self) -> None:

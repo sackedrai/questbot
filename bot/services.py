@@ -304,6 +304,7 @@ async def build_profile_text(tg_id: int) -> str:
     free_ready = await db.streak_free_available(tg_id)
     earned_count, total_count = await achievements.achievements_summary(tg_id)
     earned_titles = await achievements.achievements_list(tg_id)
+    upcoming = await achievements.next_achievement(tg_id)
 
     parts = [
         style.header("👤", "ПРОФИЛЬ", f"{nickname}  ·  🎖 уровень {level}"),
@@ -352,6 +353,8 @@ async def build_profile_text(tg_id: int) -> str:
     ]
     if earned_titles:
         parts.append(style.note("  ·  ".join(earned_titles)))
+    if upcoming:
+        parts.append(style.note(f"Ближайшее: {upcoming[0]} — {upcoming[1]}"))
     parts.append(style.section("🎚 СЛОЖНОСТЬ"))
     parts.append(f"{adaptive.TITLES.get(adaptive_level, adaptive_level)} — авто")
     parts.append(style.note(adaptive.DESCRIPTIONS.get(adaptive_level, "")))

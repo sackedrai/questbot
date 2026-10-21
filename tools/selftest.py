@@ -1271,12 +1271,57 @@ async def test_achievements() -> None:
         await db.close()
 
 
+async def test_achievements_screen() -> None:
+    """Экран достижений: полученные, закрытые и подсказка."""
+    section("Экран достижений")
+
+    import bot.achievements as achievements_module
+    from bot.achievements import build_achievements_text
+    from bot.keyboards import main_menu
+
+    db = Database(":memory:")
+    await db.connect()
+    achievements_module.db = db
+    try:
+        await db.create_user(1)
+        await db.grant_achievement(1, "first_quest")
+
+        text = await build_achievements_text(1)
+        check("ДОСТИЖЕНИЯ" in text, "есть заголовок")
+        check("1 из 9" in text, f"счётчик полученных: {text[:60]}")
+        check("✅" in text, "полученные отмечены галочкой")
+        check("🔒" in text, "неполученные закрыты замком")
+        check("Пройди 50 квестов" in text, "у закрытого есть подсказка")
+        check("Ближайшее" in text, "есть подсказка, что делать дальше")
+
+        labels = [b.text for row in main_menu().inline_keyboard for b in row]
+        check(
+            any("Достижения" in label for label in labels),
+            f"кнопка достижений есть в меню: {labels}",
+        )
+    finally:
+        await db.close()
+
+
+def test_greeting() -> None:
+    """Приветствие зависит от времени суток."""
+    section("Приветствие по времени")
+
+    from bot.daily import greeting_for
+
+    check("утро" in greeting_for(8), f"утром - утро: {greeting_for(8)}")
+    check("день" in greeting_for(14), f"днём - день: {greeting_for(14)}")
+    check("вечер" in greeting_for(20), f"вечером - вечер: {greeting_for(20)}")
+    check("ночи" in greeting_for(2), f"ночью - ночь: {greeting_for(2)}")
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
     print("=" * 56)
     test_content()
     test_scoring()
+    test_greeting()
     await test_games()
     await test_database()
     await test_tracking_session()
@@ -1291,6 +1336,7 @@ async def main() -> None:
     await test_streak_free()
     await test_pvp_rotator()
     await test_achievements()
+    await test_achievements_screen()
     await test_error_handler()
     await test_migration_old_db()
     await test_backup()

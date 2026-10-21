@@ -309,8 +309,23 @@ async def main() -> None:
     check("EditMessageText" in session.method_names(),
           f"меню переписано в экран очистки: {session.method_names()}")
 
-    # --- 8.1. в меню возвращаемся без второго меню ---
-    # в чате мог остаться другой экран (например, вызов на бой)
+    # --- 8.0. экран достижений открывается из меню ---
+    await db.create_user(555)
+    await db.set_nickname(555, "Тест")
+    session.calls.clear()
+    msg_ach = Message(message_id=45, date=datetime.now(timezone.utc),
+                      chat=chat, from_user=user)
+    cq_ach = CallbackQuery(id="cq_ach", from_user=user, chat_instance="ci",
+                           data="menu:ach", message=msg_ach)
+    await dp.feed_update(bot, Update(update_id=45, callback_query=cq_ach))
+    check("EditMessageText" in session.method_names(),
+          f"экран достижений открылся: {session.method_names()}")
+    edited = [c for c in session.calls if isinstance(c, EditMessageText)]
+    if edited:
+        check("ДОСТИЖЕНИЯ" in edited[-1].text,
+              f"на экране есть достижения: {edited[-1].text[:60]}")
+
+    # --- 8.1. в меню возвращаемся без второго меню ---    # в чате мог остаться другой экран (например, вызов на бой)
     await db.track_message(555, 40, "auto")
     session.calls.clear()
     msg_menu2 = Message(message_id=41, date=datetime.now(timezone.utc),

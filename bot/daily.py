@@ -135,6 +135,17 @@ async def auto_moment(tg_id: int) -> Optional[datetime]:
     return _apply_issued_limit(avail.due_at, last_issued)
 
 
+def greeting_for(hour: int) -> str:
+    """Приветствие по времени суток игрока."""
+    if 5 <= hour < 12:
+        return "🌅 <b>Доброе утро!</b>"
+    if 12 <= hour < 18:
+        return "☀️ <b>Добрый день!</b>"
+    if 18 <= hour < 23:
+        return "🌆 <b>Добрый вечер!</b>"
+    return "🌙 <b>Доброй ночи!</b>"
+
+
 async def send_daily_quest(bot: Bot, tg_id: int) -> bool:
     """Выдать и отправить квест дня игроку."""
     from .services import start_quest  # локальный импорт: избегаем цикла
@@ -144,10 +155,10 @@ async def send_daily_quest(bot: Bot, tg_id: int) -> bool:
     if result.blocked:
         return False
 
-    greeting = (
-        "🌅 <b>Доброе утро!</b>\n"
-        "<i>Твой квест дня ждал тебя.</i>\n\n"
-    )
+    user = await db.get_user(tg_id)
+    tz = int(user["tz_offset"]) if user and user["tz_offset"] is not None else DEFAULT_TZ
+    local_hour = (datetime.now(timezone.utc).hour + tz) % 24
+    greeting = greeting_for(local_hour) + "\n<i>Твой квест дня ждал тебя.</i>\n\n"
     try:
         # в чате остаётся только новый квест - старое убираем
         await auto_clean(bot, tg_id, db)

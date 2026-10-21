@@ -37,7 +37,8 @@ HELP_TEXT = "\n".join(
         "<pre>🎯 Квест дня       одна мини-игра в день\n"
         "⚡ Рискованный     ×2 очка, но −10 за провал\n"
         "🏆 Рейтинг         кто сколько заработал\n"
-        "👤 Профиль         очки, серия, уровень</pre>",
+        "👤 Профиль         очки, серия, уровень\n"
+        "🏅 Достижения      награды за квесты и серию</pre>",
         style.section("НАЧИСЛЕНИЕ ОЧКОВ"),
         "<pre>Сложность        10 / 20 / 30 очков\n"
         "Серия дней       ×1.05 в день, максимум ×1.5\n"
@@ -64,6 +65,7 @@ HELP_TEXT = "\n".join(
         "",
         style.note("Следующий квест приходит через 24 часа после прошлого - "
                    "в то же самое время."),
+        style.note("Пропустил день - серия сохранится: раз в неделю есть защита."),
         style.note("Кнопка «Сдаться» — если квест оказался не по силам. "
                    "Без штрафа, можно взять новый."),
         style.note("/clear — удалит всю переписку в чате, включая твои сообщения."),
@@ -338,6 +340,12 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
         await safe_edit(callback.message, HELP_TEXT, main_menu())
     elif action == "profile":
         await safe_edit(callback.message, await build_profile_text(tg_id), main_menu())
+    elif action == "ach":
+        from ..achievements import build_achievements_text
+
+        await safe_edit(
+            callback.message, await build_achievements_text(tg_id), main_menu()
+        )
     elif action == "top":
         text, scope = await build_top_text("all", tg_id)
         await safe_edit(callback.message, text, top_menu(scope))

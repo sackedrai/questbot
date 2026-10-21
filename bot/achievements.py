@@ -98,3 +98,49 @@ async def achievements_list(tg_id: int) -> list[str]:
         if spec:
             titles.append(str(spec["title"]))
     return titles
+
+
+async def next_achievement(tg_id: int) -> Optional[tuple[str, str]]:
+    """Ближайшее незаслуженное достижение: (название, подсказка)."""
+    earned = await db.earned_achievements(tg_id)
+    for code, spec in ACHIEVEMENTS.items():
+        if code not in earned:
+            return str(spec["title"]), str(spec["hint"])
+    return None
+
+
+async def build_achievements_text(tg_id: int) -> str:
+    """Экран достижений: что получено и что осталось."""
+    from . import style
+
+    earned = await db.earned_achievements(tg_id)
+    total = len(ACHIEVEMENTS)
+
+    lines: list[str] = []
+    for code, spec in ACHIEVEMENTS.items():
+        if code in earned:
+            lines.append(f"✅ {spec['title']}")
+        else:
+            lines.append(f"🔒 {spec['title']}")
+            lines.append(f"    {spec['hint']}")
+
+    parts = [
+        style.header(
+            "🏅",
+            "ДОСТИЖЕНИЯ",
+            f"{len(earned)} из {total} получено",
+        ),
+        "",
+        "<pre>" + "\n".join(lines) + "</pre>",
+        style.progress_block(len(earned), total),
+    ]
+
+    upcoming = await next_achievement(tg_id)
+    if upcoming:
+        title, hint = upcoming
+        parts.append(style.note(f"Ближайшее: {title} — {hint}"))
+    else:
+        parts.append(style.note("Все достижения собраны. Ты легенда! 🎉"))
+
+    parts.append(style.footer())
+    return "\n".join(parts)

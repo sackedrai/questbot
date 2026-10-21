@@ -13,12 +13,14 @@ def main_menu() -> InlineKeyboardMarkup:
     builder.button(text="⚔️ Вызвать на бой", callback_data="menu:pvp")
     builder.button(text="🏆 Рейтинг", callback_data="menu:top")
     builder.button(text="👤 Профиль", callback_data="menu:profile")
+    builder.button(text="🏅 Достижения", callback_data="menu:ach")
     builder.button(text="⚙️ Настройки", callback_data="menu:settings")
     builder.button(text="🔗 Приглашение", callback_data="menu:invite")
     builder.button(text="🧹 Очистить чат", callback_data="menu:clear")
     builder.button(text="ℹ️ Как играть", callback_data="menu:help")
-    builder.adjust(1, 2, 2, 2, 2)
+    builder.adjust(1, 2, 3, 2, 2)
     return builder.as_markup()
+
 
 def after_quest_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -26,7 +28,7 @@ def after_quest_menu() -> InlineKeyboardMarkup:
     builder.button(text="🏆 Рейтинг", callback_data="menu:top")
     builder.button(text="👤 Профиль", callback_data="menu:profile")
     builder.button(text="🔙 В меню", callback_data="menu:home")
-    builder.adjust(1)
+    builder.adjust(2, 2)
     return builder.as_markup()
 
 

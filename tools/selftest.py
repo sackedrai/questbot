@@ -1365,15 +1365,15 @@ async def test_admin_panel() -> None:
         async def send_message(self, chat_id: int, text: str, **kwargs) -> None:
             self.sent.append(chat_id)
 
-    old_admin = admin_module.ADMIN_CHAT_ID
-    admin_module.ADMIN_CHAT_ID = "555"
+    old_admin = admin_module.ADMIN_IDS
+    admin_module.ADMIN_IDS = (555,)
     try:
         check(is_admin(555), "владелец - админ")
         check(not is_admin(556), "остальные - не админы")
-        admin_module.ADMIN_CHAT_ID = ""
+        admin_module.ADMIN_IDS = ()
         check(not is_admin(555), "без секрета админка закрыта")
 
-        admin_module.ADMIN_CHAT_ID = "555"
+        admin_module.ADMIN_IDS = (555,)
         await db.create_user(555)
         await db.set_nickname(555, "Тест")
         await db.db.execute(
@@ -1419,7 +1419,7 @@ async def test_admin_panel() -> None:
         note = await vacuum(0)
         check("Убрано" in note, f"уборка отработала: {note}")
     finally:
-        admin_module.ADMIN_CHAT_ID = old_admin
+        admin_module.ADMIN_IDS = old_admin
         await db.close()
 
 
@@ -1478,6 +1478,42 @@ async def test_new_games() -> None:
     check(payload["_key"].startswith("math:"), f"есть ключ: {payload['_key']}")
 
 
+async def test_admin_list() -> None:
+    """Несколько админов: список и права."""
+    section("Список админов")
+
+    import bot.admin as admin_module
+    from bot.admin import admin_ids, build_admins_text, is_admin
+
+    db = Database(":memory:")
+    await db.connect()
+    admin_module.db = db
+
+    old_ids = admin_module.ADMIN_IDS
+    try:
+        admin_module.ADMIN_IDS = (111, 222)
+        check(admin_ids() == (111, 222), f"админов двое: {admin_ids()}")
+        check(is_admin(111) and is_admin(222), "оба - админы")
+        check(not is_admin(333), "остальные - нет")
+
+        await db.create_user(222)
+        await db.set_nickname(222, "Второй")
+        await db.create_user(111)
+        await db.set_nickname(111, "Первый")
+
+        text = await build_admins_text(111)
+        check("АДМИНЫ" in text, "есть раздел с админами")
+        check("111" in text and "222" in text, f"оба видны: {text[:200]}")
+        check("Первый" in text, "ники показаны")
+        check("это вы" in text, f"текущий отмечен: {text[:200]}")
+
+        empty = await build_admins_text()
+        check("АДМИНЫ" in empty, "раздел есть даже без админов")
+    finally:
+        admin_module.ADMIN_IDS = old_ids
+        await db.close()
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -1502,6 +1538,7 @@ async def main() -> None:
     await test_achievements()
     await test_achievements_screen()
     await test_admin_panel()
+    await test_admin_list()
     await test_error_handler()
     await test_migration_old_db()
     await test_backup()

@@ -337,13 +337,17 @@ def build_alert(
 def main() -> int:
     gh_token = os.getenv("GITHUB_TOKEN", "").strip()
     repo = os.getenv("GITHUB_REPOSITORY", DEFAULT_REPO).strip()
-    admin = os.getenv("ADMIN_CHAT_ID", "").strip()
+    admins = [
+        int(part)
+        for part in os.getenv("ADMIN_CHAT_ID", "").replace(",", " ").split()
+        if part.isdigit()
+    ]
     bot_token = os.getenv("BOT_TOKEN", "").strip()
 
     if not gh_token:
         print("  нет GITHUB_TOKEN - сторож не может работать")
         return 1
-    if not admin:
+    if not admins:
         print("  нет ADMIN_CHAT_ID - некому сообщать")
         return 1
 
@@ -371,11 +375,11 @@ def main() -> int:
         # бот жив, но сломан - тревожим, перезапуск не поможет
         if time.time() - state.last_alert > ALERT_COOLDOWN:
             if bot_token:
-                sent = send_telegram(
-                    bot_token, admin, build_alert(decision, state, health)
-                )
+                text = build_alert(decision, state, health)
+                sent = sum(1 for who in admins if send_telegram(bot_token, who, text))
                 print(
-                    f"  уведомление в Telegram: {'отправлено' if sent else 'НЕ отправлено'}"
+                    f"  уведомление в Telegram: {sent} из {len(admins)}"
+                    f"{' - отправлено' if sent else ' - НЕ отправлено'}"
                 )
             state.last_alert = time.time()
             state.save()
@@ -393,8 +397,13 @@ def main() -> int:
                 style.note("Сторож пришлёт сюда тревогу, если бот сломается."),
             ]
         )
-        sent = send_telegram(bot_token, admin, text) if bot_token else False
-        print(f"  тестовое уведомление: {'отправлено' if sent else 'НЕ отправлено'}")
+        sent = 0
+        if bot_token:
+            sent = sum(1 for who in admins if send_telegram(bot_token, who, text))
+        print(
+            f"  тестовое уведомление: {sent} из {len(admins)}"
+            f"{' - отправлено' if sent else ' - НЕ отправлено'}"
+        )
         return 0 if sent else 1
 
     if decision.action == "none":
@@ -418,8 +427,12 @@ def main() -> int:
         return 1
 
     if bot_token:
-        sent = send_telegram(bot_token, admin, build_alert(decision, state))
-        print(f"  уведомление в Telegram: {'отправлено' if sent else 'НЕ отправлено'}")
+        text = build_alert(decision, state)
+        sent = sum(1 for who in admins if send_telegram(bot_token, who, text))
+        print(
+            f"  уведомление в Telegram: {sent} из {len(admins)}"
+            f"{' - отправлено' if sent else ' - НЕ отправлено'}"
+        )
     state.last_alert = time.time()
     state.fails = 0
     state.save()

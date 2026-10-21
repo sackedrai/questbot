@@ -19,13 +19,45 @@ from typing import Any, Optional
 from aiogram import Bot
 
 from . import style
-from .config import ADMIN_CHAT_ID
+from .config import ADMIN_CHAT_ID, ADMIN_IDS
 from .db import db, today_iso
+
+
+def admin_ids() -> tuple[int, ...]:
+    """Все аккаунты с правами админа."""
+    return ADMIN_IDS
 
 
 def is_admin(tg_id: int) -> bool:
     """Этот игрок - администратор?"""
-    return bool(ADMIN_CHAT_ID) and str(tg_id) == ADMIN_CHAT_ID
+    return tg_id in ADMIN_IDS
+
+
+async def build_admins_text(viewer_id: int | None = None) -> str:
+    """Кто имеет права админа: список аккаунтов."""
+    ids = admin_ids()
+    if not ids:
+        return "\n".join(
+            [
+                style.section("👑 АДМИНЫ"),
+                style.note("Список пуст - не задана переменная ADMIN_CHAT_ID."),
+            ]
+        )
+
+    width = max(len(str(value)) for value in ids)
+    lines = []
+    for admin_id in ids:
+        user = await db.get_user(admin_id)
+        name = (user["nickname"] if user else "") or "без профиля"
+        mark = "  ← это вы" if admin_id == viewer_id else ""
+        lines.append(f"{admin_id:>{width}}  {name}{mark}")
+
+    return "\n".join(
+        [
+            style.section("👑 АДМИНЫ"),
+            "<pre>" + "\n".join(lines) + "</pre>",
+        ]
+    )
 
 
 # ----------------------------------------------------------------------

@@ -342,8 +342,8 @@ async def main() -> None:
     # --- 8.2. админка: обычному игроку нельзя, админу можно ---
     import bot.admin as admin_module
 
-    old_admin = admin_module.ADMIN_CHAT_ID
-    admin_module.ADMIN_CHAT_ID = ""
+    old_admin = admin_module.ADMIN_IDS
+    admin_module.ADMIN_IDS = ()
     session.calls.clear()
     msg_usr = Message(message_id=50, date=datetime.now(timezone.utc),
                       chat=chat, from_user=user, text="/admin")
@@ -354,7 +354,7 @@ async def main() -> None:
         f"обычному игроку отказали: {sent_usr[-1].text[:60] if sent_usr else None}",
     )
 
-    admin_module.ADMIN_CHAT_ID = "555"
+    admin_module.ADMIN_IDS = (555,)
     session.calls.clear()
     msg_adm = Message(message_id=51, date=datetime.now(timezone.utc),
                       chat=chat, from_user=user, text="/stats")
@@ -380,7 +380,7 @@ async def main() -> None:
         "у списка игроков есть кнопки",
     )
 
-    admin_module.ADMIN_CHAT_ID = old_admin
+    admin_module.ADMIN_IDS = old_admin
 
     # --- 9. повторное нажатие той же кнопки не плодит сообщения ---
     session.calls.clear()

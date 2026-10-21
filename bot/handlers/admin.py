@@ -36,7 +36,9 @@ async def cmd_admin(message: Message, bot: Bot) -> None:
         await message.answer(_denied())
         return
 
-    await message.answer(await _admin_home_text(), reply_markup=admin_menu())
+    await message.answer(
+        await _admin_home_text(message.from_user.id), reply_markup=admin_menu()
+    )
 
 
 @router.message(Command("stats"))
@@ -126,7 +128,11 @@ async def on_admin(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None
             _cancel_markup(),
         )
     elif action == "back":
-        await _edit(callback, await _admin_home_text(), admin_menu())
+        await _edit(
+            callback,
+            await _admin_home_text(callback.from_user.id),
+            admin_menu(),
+        )
     elif action == "cancel":
         await state.clear()
         await _edit(callback, "Отменено.", admin_menu())
@@ -174,11 +180,12 @@ def _cancel_markup() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-async def _admin_home_text() -> str:
+async def _admin_home_text(viewer_id: int | None = None) -> str:
     """Текст главного экрана админки."""
     return "\n".join(
         [
             style.header("🛠", "АДМИНКА", "всё управление ботом здесь"),
+            await admin_mod.build_admins_text(viewer_id),
             style.note("Выбери раздел:"),
             style.footer(),
         ]

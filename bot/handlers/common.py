@@ -14,7 +14,7 @@ from ..keyboards import main_menu, top_menu
 from ..services import build_profile_text, build_top_text, start_quest
 from ..states import Game, Onboarding
 from .. import style
-from ..utils import open_screen, safe_edit, wipe_chat
+from ..utils import keep_only, open_screen, safe_edit, wipe_chat
 
 router = Router()
 
@@ -319,6 +319,10 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     action = callback.data.split(":", 1)[1]
     tg_id = callback.from_user.id
 
+    # в чате могли остаться другие экраны (вызов на бой, сводка и т.п.) -
+    # убираем их, чтобы меню в чате было одно
+    await keep_only(bot, callback.message.chat.id, db, callback.message.message_id)
+
     if action == "home":
         await safe_edit(
             callback.message,
@@ -361,7 +365,7 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     elif action == "pvp":
         from .pvp import create_flow
 
-        await create_flow(callback.message, bot)
+        await create_flow(callback.message, bot, edit=True)
     elif action == "settings":
         from .settings import _settings_markup
 

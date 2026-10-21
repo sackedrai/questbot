@@ -142,11 +142,14 @@ async def main() -> None:
     import bot.pvp as pvp_module
     import bot.selfcheck as selfcheck_module
     import bot.middleware as middleware_module
+    import bot.handlers.pvp as pvp_handlers_module
+    import bot.handlers.settings as settings_handlers_module
 
     for module in (services_module, common_module, games_module,
                    profile_module, quests_module, ranking_module,
                    daily_module, adaptive_module, pvp_module,
-                   selfcheck_module, middleware_module):
+                   selfcheck_module, middleware_module,
+                   pvp_handlers_module, settings_handlers_module):
         module.db = db
 
     session = MockSession()
@@ -297,6 +300,20 @@ async def main() -> None:
     check("EditMessageText" in session.method_names(),
           f"меню переписано в экран очистки: {session.method_names()}")
 
+    # --- 8.1. в меню возвращаемся без второго меню ---
+    # в чате мог остаться другой экран (например, вызов на бой)
+    await db.track_message(555, 40, "auto")
+    session.calls.clear()
+    msg_menu2 = Message(message_id=41, date=datetime.now(timezone.utc),
+                        chat=chat, from_user=user)
+    cq_menu2 = CallbackQuery(id="cq_menu_home", from_user=user, chat_instance="ci",
+                             data="menu:home", message=msg_menu2)
+    await dp.feed_update(bot, Update(update_id=41, callback_query=cq_menu2))
+    deleted = session.deleted_ids()
+    check(40 in deleted,
+          f"прошлый экран удалён при возврате в меню: {sorted(deleted)[:8]}")
+    check(41 not in deleted, f"само меню осталось: {sorted(deleted)[:8]}")
+
     # --- 9. повторное нажатие той же кнопки не плодит сообщения ---
     session.calls.clear()
     msg_top = Message(message_id=30, date=datetime.now(timezone.utc),
@@ -337,6 +354,18 @@ async def main() -> None:
                 code = found.group(1)
                 break
     check(bool(code), f"код вызова создан: {code}")
+
+    # вызов из меню: сообщение переписывается на месте, второго окна нет
+    session.calls.clear()
+    msg_menu_pvp = Message(message_id=42, date=datetime.now(timezone.utc),
+                           chat=Chat(id=600, type="private"), from_user=user_a)
+    cq_pvp = CallbackQuery(id="cq_pvp", from_user=user_a, chat_instance="ci",
+                           data="menu:pvp", message=msg_menu_pvp)
+    await dp.feed_update(bot, Update(update_id=42, callback_query=cq_pvp))
+    sent_pvp = [c for c in session.calls if isinstance(c, SendMessage)]
+    edited_pvp = [c for c in session.calls if isinstance(c, EditMessageText)]
+    check(not sent_pvp, f"вызов из меню не создаёт второго окна: {len(sent_pvp)}")
+    check(edited_pvp, "вызов из меню переписан на месте")
 
     session.calls.clear()
     msg_acc = Message(message_id=41, date=datetime.now(timezone.utc),

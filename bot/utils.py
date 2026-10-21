@@ -108,6 +108,39 @@ async def auto_clean(
     return deleted
 
 
+async def keep_only(
+    bot: Bot,
+    chat_id: int,
+    db,
+    keep_id: int,
+) -> int:
+    """Оставить в чате только одно сообщение бота - остальные удалить.
+
+    Нужно при возврате в меню: в чате могли остаться другие экраны
+    (например, сообщение с вызовом на бой), и тогда меню получалось бы
+    не одно, а два.
+
+    Сообщения, которые Telegram уже не даёт удалить (старше 48 часов),
+    просто забываем - иначе таблица в базе будет расти вечно.
+    """
+    message_ids = await db.chat_messages(chat_id, limit=200)
+    removed = 0
+    forgotten: list[int] = []
+
+    for message_id in message_ids:
+        if message_id == keep_id:
+            continue
+        try:
+            await bot.delete_message(chat_id, message_id)
+            removed += 1
+        except Exception:  # noqa: BLE001 - старое или уже удалено
+            pass
+        forgotten.append(message_id)
+
+    await db.forget_messages(chat_id, forgotten)
+    return removed
+
+
 async def open_screen(
     bot: Bot,
     message: Message,

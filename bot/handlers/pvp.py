@@ -13,6 +13,7 @@ from ..db import db
 from ..keyboards import main_menu
 from ..pvp import accept_challenge, create_challenge, format_match, player_name
 from ..services import start_quest
+from ..utils import auto_clean, open_screen, safe_edit
 from .. import style
 
 router = Router()
@@ -23,28 +24,33 @@ async def _invite_link(bot: Bot, code: str) -> str:
     return f"https://t.me/{me.username}?start=pvp_{code}"
 
 
-async def create_flow(message: Message, bot: Bot) -> None:
-    """Создать вызов и отдать ссылку сопернику."""
+async def create_flow(message: Message, bot: Bot, edit: bool = False) -> None:
+    """Создать вызов и отдать ссылку сопернику.
+
+    ``edit`` - править текущее сообщение на месте (вызов из меню). Иначе
+    отправляем новый экран, предварительно убрав прошлые.
+    """
     code = await create_challenge(message.from_user.id)
     link = await _invite_link(bot, code)
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 В меню", callback_data="menu:home")
     builder.adjust(1)
-    await message.answer(
-        "\n".join(
-            [
-                style.header("⚔️", "ВЫЗОВ НА БОЙ"),
-                "Отправь другу ссылку — он придёт по ней,\n"
-                "и вы оба получите <b>одинаковый квест</b>.",
-                "",
-                f"<code>{link}</code>",
-                "",
-                style.note(f"Код вызова: {code}"),
-                style.note("Кто наберёт больше очков — победил."),
-            ]
-        ),
-        reply_markup=builder.as_markup(),
+    text = "\n".join(
+        [
+            style.header("⚔️", "ВЫЗОВ НА БОЙ"),
+            "Отправь другу ссылку — он придёт по ней,\n"
+            "и вы оба получите <b>одинаковый квест</b>.",
+            "",
+            f"<code>{link}</code>",
+            "",
+            style.note(f"Код вызова: {code}"),
+            style.note("Кто наберёт больше очков — победил."),
+        ]
     )
+    if edit:
+        await safe_edit(message, text, builder.as_markup())
+    else:
+        await open_screen(bot, message, db, text, reply_markup=builder.as_markup())
 
 
 async def accept_flow(message: Message, bot: Bot, code: str) -> None:
@@ -87,6 +93,8 @@ async def accept_flow(message: Message, bot: Bot, code: str) -> None:
             "<i>Одинаковый квест у обоих. Кто наберёт больше очков — победил.</i>\n\n"
         )
         try:
+            # в чате остаётся только квест матча
+            await auto_clean(bot, player_id, db)
             await bot.send_message(
                 player_id, header + result.text, reply_markup=result.markup
             )
@@ -94,14 +102,17 @@ async def accept_flow(message: Message, bot: Bot, code: str) -> None:
             continue
 
     challenger = await player_name(match["player1"])
-    await message.answer(
+    await open_screen(
+        bot,
+        message,
+        db,
         "\n".join(
             [
                 style.header("⚔️", "МАТЧ НАЧАЛСЯ"),
                 f"Соперник: <b>{challenger}</b>",
                 style.note("Квест у обоих одинаковый. Удачи!"),
             ]
-        )
+        ),
     )
 
 

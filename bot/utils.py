@@ -28,16 +28,45 @@ async def safe_edit(
         await message.answer(text, reply_markup=reply_markup)
 
 
+# Сколько последних номеров сообщений чистим «вслепую» - на случай, если
+# сообщение игрока не отследилось. Больше не нужно: перебор большого
+# диапазона недопустим, номера в чате растут быстро, и удаление тысячи
+# сообщений по одному занимает десятки минут.
+BLIND_WINDOW = 30
+
+# Сколько известных сообщений держим в базе для чистки
+TRACKED_LIMIT = 100
+
+
+async def _delete_ids(
+    bot: Bot,
+    chat_id: int,
+    db,
+    ids: Iterable[int],
+) -> int:
+    """Удалить перечисленные сообщения и забыть их в базе."""
+    deleted = 0
+    forgotten: list[int] = []
+    for message_id in ids:
+        try:
+            await bot.delete_message(chat_id, message_id)
+            deleted += 1
+        except Exception:  # noqa: BLE001 - старое или уже удалено
+            pass
+        forgotten.append(message_id)
+    await db.forget_messages(chat_id, forgotten)
+    return deleted
+
+
 async def wipe_chat(
     bot: Bot,
     chat_id: int,
     db,
     up_to_id: int,
-    margin: int = 20,
     window: int = 100,
     keep: Iterable[int] = (),
 ) -> tuple[int, int]:
-    """Удалить из чата все сообщения - и бота, и пользователя.
+    """Удалить из чата сообщения - и бота, и пользователя.
 
     В личном чате бот имеет право удалять сообщения обеих сторон,
     поэтому можно вычистить переписку целиком.
@@ -46,40 +75,15 @@ async def wipe_chat(
     удалять не даёт - их просто пропускаем.
     """
     keep_ids = set(keep)
-    tracked = await db.chat_messages(chat_id, limit=200)
-    if tracked:
-        low = max(1, min(tracked) - margin)
-    else:
-        low = max(1, up_to_id - window)
-
-    candidates = [
-        i for i in range(low, up_to_id + 1) if i > 0 and i not in keep_ids
-    ]
-    if not candidates:
+    tracked = await db.chat_messages(chat_id, limit=TRACKED_LIMIT)
+    targets = {i for i in tracked if i <= up_to_id}
+    low = max(1, up_to_id - window)
+    targets.update(range(low, up_to_id + 1))
+    ids = sorted(i for i in targets if i not in keep_ids)
+    if not ids:
         return 0, 0
-
-    deleted = 0
-    failed: list[int] = []
-
-    # сначала пачками - так быстрее
-    for start in range(0, len(candidates), 50):
-        chunk = candidates[start:start + 50]
-        try:
-            await bot.delete_messages(chat_id, chunk)
-            deleted += len(chunk)
-        except Exception:
-            failed.extend(chunk)
-
-    # что пачкой не вышло - пробуем по одному
-    for message_id in failed:
-        try:
-            await bot.delete_message(chat_id, message_id)
-            deleted += 1
-        except Exception:
-            continue
-
-    await db.forget_messages(chat_id, candidates)
-    return deleted, len(candidates)
+    deleted = await _delete_ids(bot, chat_id, db, ids)
+    return deleted, len(ids)
 
 
 async def auto_clean(
@@ -97,15 +101,17 @@ async def auto_clean(
     ``up_to_id`` - до какого сообщения чистим включительно. Если не
     задан, берём последнее сообщение бота в этом чате.
     """
+    keep_ids = set(keep)
+    tracked = await db.chat_messages(chat_id, limit=TRACKED_LIMIT)
     if not up_to_id:
-        tracked = await db.chat_messages(chat_id, limit=200)
         up_to_id = max(tracked, default=0)
     if not up_to_id:
         return 0
-    deleted, _ = await wipe_chat(
-        bot, chat_id, db, up_to_id=up_to_id, keep=keep
-    )
-    return deleted
+    targets = {i for i in tracked if i <= up_to_id}
+    low = max(1, up_to_id - BLIND_WINDOW)
+    targets.update(range(low, up_to_id + 1))
+    ids = sorted(i for i in targets if i not in keep_ids)
+    return await _delete_ids(bot, chat_id, db, ids)
 
 
 async def keep_only(

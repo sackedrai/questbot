@@ -1032,6 +1032,71 @@ async def test_auto_clean() -> None:
         bot3 = FakeBot()
         deleted = await auto_clean(bot3, 7, db)
         check(deleted >= 0, f"авточистка отработала: {deleted}")
+
+        # middleware запоминает сообщения игрока - чтобы чистить их потом
+        from datetime import datetime, timezone
+
+        from aiogram.types import Chat, Message, User
+
+        import bot.middleware as middleware_module
+        from bot.middleware import ErrorCounterMiddleware
+
+        middleware_module.db = db
+        middleware = ErrorCounterMiddleware()
+
+        async def _handler(event, data):
+            return "ok"
+
+        msg = Message(
+            message_id=77,
+            date=datetime.now(timezone.utc),
+            chat=Chat(id=5, type="private"),
+            from_user=User(id=5, is_bot=False, first_name="И"),
+            text="привет",
+        )
+        await middleware(_handler, msg, {})
+        tracked = await db.chat_messages(5)
+        check(77 in tracked, f"middleware запомнил сообщение игрока: {tracked}")
+
+        # а callback - это сообщение бота, его запоминать не надо
+        before = len(tracked)
+        await middleware(_handler, object(), {})
+        check(len(await db.chat_messages(5)) == before,
+              "не-сообщения не запоминаются")
+    finally:
+        await db.close()
+
+
+async def test_cleanup_is_bounded() -> None:
+    """Чистка не должна перебирать тысячи номеров сообщений."""
+    section("Чистка ограничена по объёму")
+
+    from bot.utils import auto_clean
+
+    class FakeBot:
+        def __init__(self) -> None:
+            self.deleted: list[int] = []
+
+        async def delete_message(self, chat_id: int, message_id: int) -> None:
+            self.deleted.append(message_id)
+
+    db = Database(":memory:")
+    await db.connect()
+    try:
+        # чат живёт давно: номера сообщений разошлись на тысячи
+        await db.track_message(5, 30, "auto")
+        await db.track_message(5, 9000, "auto")
+
+        bot = FakeBot()
+        await auto_clean(bot, 5, db, up_to_id=9000)
+        check(
+            len(bot.deleted) <= 250,
+            f"удалено не больше пары сотен сообщений: {len(bot.deleted)}",
+        )
+        check(30 in bot.deleted, "старый известный номер тоже удалён")
+        check(9000 in bot.deleted, "последнее сообщение удалено")
+        left = await db.chat_messages(5)
+        check(not left, "база забыла удалённые сообщения")
     finally:
         await db.close()
 
@@ -1052,6 +1117,7 @@ async def main() -> None:
     await test_daily_pass_batch()
     await test_profile_and_top()
     await test_auto_clean()
+    await test_cleanup_is_bounded()
     await test_migration_old_db()
     await test_backup()
     test_watchdog_logic()

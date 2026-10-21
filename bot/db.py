@@ -490,7 +490,10 @@ class Database:
     async def track_message(
         self, chat_id: int, message_id: int, kind: str = "quest"
     ) -> None:
-        """Запомнить сообщение бота, чтобы потом удалить его из чата."""
+        """Запомнить сообщение, чтобы потом удалить его из чата.
+
+        kind: 'quest'/'auto' - сообщения бота, 'user' - сообщения игрока.
+        """
         await self.db.execute(
             "INSERT INTO messages (chat_id, message_id, kind, created_at)"
             " VALUES (?, ?, ?, ?)",

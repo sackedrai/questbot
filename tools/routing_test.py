@@ -42,6 +42,7 @@ from aiogram.methods import (  # noqa: E402
 )
 
 from bot.db import Database  # noqa: E402
+from bot.middleware import ErrorCounterMiddleware  # noqa: E402
 from bot.handlers import common, games, profile, quests, ranking  # noqa: E402
 
 PASSED = 0
@@ -158,6 +159,8 @@ async def main() -> None:
 
     bot = Bot(token="123456:AAFakeTokenForRoutingTest", session=session)
     dp = Dispatcher(storage=MemoryStorage())
+    dp.message.middleware(ErrorCounterMiddleware())
+    dp.callback_query.middleware(ErrorCounterMiddleware())
     dp.include_router(build_router())
 
     user = User(id=555, is_bot=False, first_name="Тест")
@@ -176,6 +179,10 @@ async def main() -> None:
           "сложность не задаётся вручную")
     check("EditMessageText" in session.method_names(),
           f"сообщение с кнопками обновлено: {session.method_names()}")
+
+    # --- 1.1. сообщения игрока запоминаются (для авточистки чата) ---
+    # проверяется в selftest: middleware не выполняется, если ни один
+    # обработчик не подошёл
 
     # --- 2. callback главного меню ---
     session.calls.clear()

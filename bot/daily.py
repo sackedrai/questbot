@@ -138,6 +138,7 @@ async def auto_moment(tg_id: int) -> Optional[datetime]:
 async def send_daily_quest(bot: Bot, tg_id: int) -> bool:
     """Выдать и отправить квест дня игроку."""
     from .services import start_quest  # локальный импорт: избегаем цикла
+    from .utils import auto_clean  # локальный импорт: избегаем цикла
 
     result = await start_quest(tg_id, risky=False)
     if result.blocked:
@@ -148,6 +149,8 @@ async def send_daily_quest(bot: Bot, tg_id: int) -> bool:
         "<i>Твой квест дня ждал тебя.</i>\n\n"
     )
     try:
+        # в чате остаётся только новый квест - старое убираем
+        await auto_clean(bot, tg_id, db)
         await bot.send_message(tg_id, greeting + result.text, reply_markup=result.markup)
     except Exception:  # noqa: BLE001 - чат мог быть заблокирован
         return False

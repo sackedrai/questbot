@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
+from ..db import db
 from ..keyboards import top_menu
 from ..services import build_top_text
-from ..utils import safe_edit
+from ..utils import open_screen, safe_edit
 
 router = Router()
 
 
 @router.message(Command("top"))
-async def cmd_top(message: Message) -> None:
+async def cmd_top(message: Message, bot: Bot) -> None:
     text, scope = await build_top_text("all", message.from_user.id)
-    await message.answer(text, reply_markup=top_menu(scope))
+    await open_screen(bot, message, db, text, reply_markup=top_menu(scope))
 
 
 @router.callback_query(F.data.startswith("top:"))

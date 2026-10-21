@@ -12,7 +12,7 @@ from .. import adaptive, style
 from ..db import db
 from ..keyboards import main_menu
 from ..states import Onboarding
-from ..utils import safe_edit
+from ..utils import open_screen, safe_edit
 
 router = Router()
 
@@ -50,9 +50,9 @@ async def _settings_markup(tg_id: int) -> tuple[str, InlineKeyboardBuilder]:
 
 
 @router.message(Command("settings"))
-async def cmd_settings(message: Message) -> None:
+async def cmd_settings(message: Message, bot: Bot) -> None:
     text, builder = await _settings_markup(message.from_user.id)
-    await message.answer(text, reply_markup=builder.as_markup())
+    await open_screen(bot, message, db, text, reply_markup=builder.as_markup())
 
 
 @router.callback_query(F.data.startswith("set:"))

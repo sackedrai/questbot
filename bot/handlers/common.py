@@ -14,7 +14,7 @@ from ..keyboards import main_menu, top_menu
 from ..services import build_profile_text, build_top_text, start_quest
 from ..states import Game, Onboarding
 from .. import style
-from ..utils import cleanup_chat, safe_edit, wipe_chat
+from ..utils import open_screen, safe_edit, wipe_chat
 
 router = Router()
 
@@ -112,10 +112,13 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot) -> None:
 
     if not user["nickname"]:
         await state.set_state(Onboarding.nickname)
-        await message.answer(WELCOME_TEXT)
+        await open_screen(bot, message, db, WELCOME_TEXT)
         return
 
-    await message.answer(
+    await open_screen(
+        bot,
+        message,
+        db,
         "\n".join(
             [
                 style.header("👋", "С ВОЗВРАЩЕНИЕМ", f"{user['nickname']}!"),
@@ -131,7 +134,10 @@ async def on_nickname(message: Message, state: FSMContext, bot: Bot) -> None:
     nickname = html.escape(message.text.strip()[:20]) or "Аноним"
     await db.set_nickname(message.from_user.id, nickname)
     await state.clear()
-    await message.answer(
+    await open_screen(
+        bot,
+        message,
+        db,
         "\n".join(
             [
                 style.header("🤝", "ПРИЯТНО ПОЗНАКОМИТЬСЯ!", nickname),
@@ -145,18 +151,22 @@ async def on_nickname(message: Message, state: FSMContext, bot: Bot) -> None:
 
 
 @router.message(Command("difficulty"))
-async def cmd_difficulty(message: Message) -> None:
+async def cmd_difficulty(message: Message, bot: Bot) -> None:
     """Показать текущий адаптивный уровень."""
     from .. import adaptive
 
     level = await adaptive.current_level(message.from_user.id)
-    await message.answer(
+    await open_screen(
+        bot,
+        message,
+        db,
         "\n".join(
             [
                 style.header("🎚", "СЛОЖНОСТЬ АВТОМАТИЧЕСКАЯ", adaptive.describe(level)),
                 style.note("Бот смотрит, как ты играешь, и сам меняет уровень."),
             ]
-        )
+        ),
+        reply_markup=main_menu(),
     )
 
 
@@ -180,19 +190,22 @@ async def on_difficulty(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(Command("help"))
-async def cmd_help(message: Message) -> None:
-    await message.answer(HELP_TEXT, reply_markup=main_menu())
+async def cmd_help(message: Message, bot: Bot) -> None:
+    await open_screen(bot, message, db, HELP_TEXT, reply_markup=main_menu())
 
 
 @router.message(Command("tz"))
-async def cmd_tz(message: Message) -> None:
+async def cmd_tz(message: Message, bot: Bot) -> None:
     """Выбрать часовой пояс - от него зависит время выдачи квеста."""
     builder = InlineKeyboardBuilder()
     for title, offset in TZ_CHOICES:
         builder.button(text=f"{title}  UTC+{offset}", callback_data=f"tz:{offset}")
     builder.button(text="Другой — напишу сам", callback_data="tz:custom")
     builder.adjust(2)
-    await message.answer(
+    await open_screen(
+        bot,
+        message,
+        db,
         "\n".join(
             [
                 style.header("🕐", "ЧАСОВОЙ ПОЯС", "время выдачи ежедневного квеста"),
@@ -237,7 +250,7 @@ async def on_tz(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(Onboarding.tz, F.text)
-async def on_tz_custom(message: Message, state: FSMContext) -> None:
+async def on_tz_custom(message: Message, state: FSMContext, bot: Bot) -> None:
     raw = message.text.strip().replace(",", ".")
     try:
         offset = int(float(raw))
@@ -249,7 +262,10 @@ async def on_tz_custom(message: Message, state: FSMContext) -> None:
         return
     await db.set_tz(message.from_user.id, offset)
     await state.clear()
-    await message.answer(
+    await open_screen(
+        bot,
+        message,
+        db,
         "\n".join(
             [
                 style.header("✅", "ЧАСОВОЙ ПОЯС СОХРАНЁН"),
@@ -265,7 +281,10 @@ async def cmd_invite(message: Message, bot: Bot) -> None:
     """Ссылка-приглашение для друзей."""
     me = await bot.me()
     link = f"https://t.me/{me.username}"
-    await message.answer(
+    await open_screen(
+        bot,
+        message,
+        db,
         "\n".join(
             [
                 style.header("🔗", "ПРИГЛАШЕНИЕ"),
@@ -274,7 +293,8 @@ async def cmd_invite(message: Message, bot: Bot) -> None:
                 style.note("Каждый играет сам: своя статистика, свой квест в сутки."),
                 style.note("А в рейтинге видно всех сразу."),
             ]
-        )
+        ),
+        reply_markup=main_menu(),
     )
 
 

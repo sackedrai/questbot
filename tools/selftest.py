@@ -979,6 +979,63 @@ async def test_profile_and_top() -> None:
         await db.close()
 
 
+async def test_auto_clean() -> None:
+    """Авточистка: в чате остаётся только текущий экран."""
+    section("Авточистка чата")
+
+    from bot.utils import auto_clean, open_screen
+
+    class FakeBot:
+        def __init__(self) -> None:
+            self.deleted: list[int] = []
+
+        async def delete_messages(self, chat_id: int, ids: list[int]) -> None:
+            self.deleted.extend(ids)
+
+        async def delete_message(self, chat_id: int, message_id: int) -> None:
+            self.deleted.append(message_id)
+
+    class FakeMessage:
+        def __init__(self, chat_id: int, message_id: int) -> None:
+            self.chat = type("Chat", (), {"id": chat_id})()
+            self.message_id = message_id
+            self.sent: list[str] = []
+
+        async def answer(self, text: str, reply_markup=None):
+            self.sent.append(text)
+            return self
+
+    db = Database(":memory:")
+    await db.connect()
+    try:
+        # раньше бот писал в этом чате
+        await db.track_message(5, 10, "auto")
+        await db.track_message(5, 11, "auto")
+        await db.track_message(5, 12, "auto")
+
+        bot = FakeBot()
+        message = FakeMessage(5, 13)
+        await open_screen(bot, message, db, "НОВЫЙ ЭКРАН")
+        check(message.sent == ["НОВЫЙ ЭКРАН"], "экран отправлен")
+        check(10 in bot.deleted and 12 in bot.deleted, "прошлые сообщения бота удалены")
+        check(13 in bot.deleted, "сообщение игрока, которым вызван экран, тоже удалено")
+        left = await db.chat_messages(5)
+        check(not left, "база забыла удалённые сообщения")
+
+        # пустой чат - удалять нечего, экран всё равно отправляется
+        bot2 = FakeBot()
+        message2 = FakeMessage(7, 1)
+        await open_screen(bot2, message2, db, "ПЕРВЫЙ ЭКРАН")
+        check(message2.sent == ["ПЕРВЫЙ ЭКРАН"], "первый экран отправлен")
+
+        # авточистка без нового сообщения (например, перед автоквестом)
+        bot3 = FakeBot()
+        deleted = await auto_clean(bot3, 7, db)
+        check(deleted >= 0, f"авточистка отработала: {deleted}")
+    finally:
+        await db.close()
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -994,6 +1051,7 @@ async def main() -> None:
     await test_novice_level()
     await test_daily_pass_batch()
     await test_profile_and_top()
+    await test_auto_clean()
     await test_migration_old_db()
     await test_backup()
     test_watchdog_logic()

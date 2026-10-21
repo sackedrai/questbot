@@ -10,7 +10,7 @@ from aiogram.types import Message
 from ..db import db
 from ..services import start_quest
 from ..states import Game
-from ..utils import cleanup_chat
+from ..utils import open_screen
 
 router = Router()
 
@@ -29,10 +29,8 @@ async def _give_quest(
     else:
         await state.clear()
 
-    # чистим прошлые сообщения бота, чтобы чат не засорялся
-    await cleanup_chat(bot, message.chat.id, db)
-
-    await message.answer(result.text, reply_markup=result.markup)
+    # чистим прошлые сообщения, чтобы в чате остался только квест
+    await open_screen(bot, message, db, result.text, reply_markup=result.markup)
 
 
 @router.message(Command("quest"))

@@ -62,9 +62,15 @@ class FakeBot:
 
     def __init__(self) -> None:
         self.deleted: list[tuple[int, int]] = []
+        self.deleted_chunks: list[tuple[int, list[int]]] = []
 
     async def delete_message(self, chat_id: int, message_id: int) -> None:
         self.deleted.append((chat_id, message_id))
+
+    async def delete_messages(self, chat_id: int, message_ids: list[int]) -> None:
+        self.deleted_chunks.append((chat_id, list(message_ids)))
+        for message_id in message_ids:
+            self.deleted.append((chat_id, message_id))
 
 
 class FakeMessage:
@@ -196,21 +202,21 @@ async def run_flow(db: Database, game_type: str) -> None:
 
     # 8. Профиль и рейтинг
     profile_msg = FakeMessage("/profile", user)
-    await profile.cmd_profile(profile_msg)
+    await profile.cmd_profile(profile_msg, fake_bot)
     check("профиль" in profile_msg.last_text.lower(), "профиль построен")
 
     top_msg = FakeMessage("/top", user)
-    await ranking.cmd_top(top_msg)
+    await ranking.cmd_top(top_msg, fake_bot)
     check("рейтинг" in top_msg.last_text.lower(), "рейтинг построен")
     check("Вася" in top_msg.last_text, "игрок есть в рейтинге")
 
     # 9–10. Команды
     diff_msg = FakeMessage("/difficulty", user)
-    await common.cmd_difficulty(diff_msg)
+    await common.cmd_difficulty(diff_msg, fake_bot)
     check(bool(diff_msg.sent), "команда смены сложности отвечает")
 
     help_msg = FakeMessage("/help", user)
-    await common.cmd_help(help_msg)
+    await common.cmd_help(help_msg, fake_bot)
     check("как играть" in help_msg.last_text.lower(), "справка отдаётся")
 
 

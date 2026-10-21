@@ -82,35 +82,43 @@ async def wipe_chat(
     return deleted, len(candidates)
 
 
-async def cleanup_chat(
+async def auto_clean(
     bot: Bot,
     chat_id: int,
     db,
+    up_to_id: int = 0,
     keep: Iterable[int] = (),
-    limit: int = 50,
 ) -> int:
-    """Удалить из чата ранее отправленные ботом сообщения.
+    """Убрать из чата прошлые сообщения - и бота, и игрока.
 
-    Возвращает количество удалённых сообщений. Сообщения, которые Telegram
-    уже не даёт удалить (старше 48 часов), просто забываются.
+    В личном чате бот имеет право удалять сообщения обеих сторон, так
+    что в чате остаётся ровно то, что бот показывает сейчас.
+
+    ``up_to_id`` - до какого сообщения чистим включительно. Если не
+    задан, берём последнее сообщение бота в этом чате.
     """
-    keep_ids = set(keep)
-    message_ids = await db.chat_messages(chat_id, limit=limit)
-    removed = 0
-    forgotten: list[int] = []
+    if not up_to_id:
+        tracked = await db.chat_messages(chat_id, limit=200)
+        up_to_id = max(tracked, default=0)
+    if not up_to_id:
+        return 0
+    deleted, _ = await wipe_chat(
+        bot, chat_id, db, up_to_id=up_to_id, keep=keep
+    )
+    return deleted
 
-    for message_id in message_ids:
-        if message_id in keep_ids:
-            continue
-        try:
-            await bot.delete_message(chat_id, message_id)
-            removed += 1
-            forgotten.append(message_id)
-        except TelegramBadRequest:
-            # слишком старое или уже удалено - больше не мучаемся
-            forgotten.append(message_id)
-        except Exception:
-            continue
 
-    await db.forget_messages(chat_id, forgotten)
-    return removed
+async def open_screen(
+    bot: Bot,
+    message: Message,
+    db,
+    text: str,
+    reply_markup: Optional[InlineKeyboardMarkup] = None,
+) -> Message:
+    """Открыть новый экран: сперва убрать из чата прошлые сообщения.
+
+    Экраны, которые бот правит на месте (safe_edit), чистить не нужно -
+    а вот новые сообщения иначе копятся в чате.
+    """
+    await auto_clean(bot, message.chat.id, db, up_to_id=message.message_id)
+    return await message.answer(text, reply_markup=reply_markup)

@@ -143,6 +143,7 @@ async def main() -> None:
     import bot.pvp as pvp_module
     import bot.selfcheck as selfcheck_module
     import bot.middleware as middleware_module
+    import bot.achievements as achievements_module
     import bot.handlers.pvp as pvp_handlers_module
     import bot.handlers.settings as settings_handlers_module
 
@@ -150,7 +151,8 @@ async def main() -> None:
                    profile_module, quests_module, ranking_module,
                    daily_module, adaptive_module, pvp_module,
                    selfcheck_module, middleware_module,
-                   pvp_handlers_module, settings_handlers_module):
+                   pvp_handlers_module, settings_handlers_module,
+                   achievements_module):
         module.db = db
 
     session = MockSession()

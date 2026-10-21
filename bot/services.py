@@ -20,7 +20,7 @@ from .db import db, today_iso
 from .daily import STATE_ACTIVE, STATE_COOLDOWN, STATE_DUE, availability
 from .games import Quest, Render, get_game
 from .scoring import calculate_points, level_for_points
-from . import adaptive, style
+from . import achievements, adaptive, style
 
 GAME_TYPES = ("quiz", "fast", "timeline", "riddle", "word")
 
@@ -229,6 +229,9 @@ async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
         ]
         if not is_pvp and await db.streak_free_used_today(quest.tg_id, quest.day):
             lines.append(style.note("🛡 Защита серии сработала — пропущенный день не обнулил её."))
+        fresh = await achievements.check_achievements(quest.tg_id)
+        for title in fresh:
+            lines.append(style.note(f"🏅 Новое достижение: {title}"))
         summary = "\n".join(lines)
     else:
         if points < 0:
@@ -299,6 +302,8 @@ async def build_profile_text(tg_id: int) -> str:
     adaptive_level = await adaptive.current_level(tg_id)
     unique_items = await db.count_used_items(tg_id)
     free_ready = await db.streak_free_available(tg_id)
+    earned_count, total_count = await achievements.achievements_summary(tg_id)
+    earned_titles = await achievements.achievements_list(tg_id)
 
     parts = [
         style.header("👤", "ПРОФИЛЬ", f"{nickname}  ·  🎖 уровень {level}"),
@@ -342,11 +347,15 @@ async def build_profile_text(tg_id: int) -> str:
                 ("", "Очки матчей", style.number(user["pvp_points"] or 0)),
             ]
         ),
-        style.section("🎚 СЛОЖНОСТЬ"),
-        f"{adaptive.TITLES.get(adaptive_level, adaptive_level)} — авто",
-        style.note(adaptive.DESCRIPTIONS.get(adaptive_level, "")),
-        style.footer(),
+        style.section("🏅 ДОСТИЖЕНИЯ"),
+        f"{earned_count} из {total_count}",
     ]
+    if earned_titles:
+        parts.append(style.note("  ·  ".join(earned_titles)))
+    parts.append(style.section("🎚 СЛОЖНОСТЬ"))
+    parts.append(f"{adaptive.TITLES.get(adaptive_level, adaptive_level)} — авто")
+    parts.append(style.note(adaptive.DESCRIPTIONS.get(adaptive_level, "")))
+    parts.append(style.footer())
     return "\n".join(parts)
 
 

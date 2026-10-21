@@ -61,6 +61,13 @@ CREATE TABLE IF NOT EXISTS meta (
     value TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS achievements (
+    tg_id     INTEGER NOT NULL,
+    code      TEXT    NOT NULL,
+    earned_at REAL    DEFAULT 0,
+    PRIMARY KEY (tg_id, code)
+);
+
 CREATE TABLE IF NOT EXISTS pvp_matches (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     code        TEXT    UNIQUE,
@@ -544,7 +551,26 @@ class Database:
             return await cur.fetchone()  # type: ignore[return-value]
 
     # ------------------------------------------------------------------
-    # отслеживание сообщений (для очистки чата)
+    # достижения
+    # ------------------------------------------------------------------
+    async def earned_achievements(self, tg_id: int) -> set[str]:
+        """Коды уже полученных достижений."""
+        async with self.db.execute(
+            "SELECT code FROM achievements WHERE tg_id = ?", (tg_id,)
+        ) as cur:
+            rows = await cur.fetchall()
+        return {row["code"] for row in rows}
+
+    async def grant_achievement(self, tg_id: int, code: str) -> None:
+        await self.db.execute(
+            "INSERT OR IGNORE INTO achievements (tg_id, code, earned_at)"
+            " VALUES (?, ?, ?)",
+            (tg_id, code, time.time()),
+        )
+        await self.db.commit()
+
+    # ------------------------------------------------------------------
+    # сообщения (для очистки чата)
     # ------------------------------------------------------------------
     async def track_message(
         self, chat_id: int, message_id: int, kind: str = "quest"

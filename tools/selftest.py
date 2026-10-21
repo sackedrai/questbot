@@ -923,6 +923,7 @@ async def test_profile_and_top() -> None:
     section("Профиль и рейтинг")
 
     import bot.adaptive as adaptive
+    import bot.achievements as achievements_module
     import bot.daily as daily
     import bot.services as services
 
@@ -931,6 +932,7 @@ async def test_profile_and_top() -> None:
     services.db = db
     daily.db = db
     adaptive.db = db
+    achievements_module.db = db
 
     try:
         # 12 игроков, у каждого свои очки
@@ -1226,6 +1228,49 @@ async def test_error_handler() -> None:
     check("СЛОМАЛОСЬ" in text, f"в ответе есть понятное объяснение: {text[:60]}")
 
 
+async def test_achievements() -> None:
+    """Достижения выдаются по статистике и не дублируются."""
+    section("Достижения")
+
+    import bot.achievements as achievements_module
+    from bot.achievements import ACHIEVEMENTS, check_achievements
+
+    db = Database(":memory:")
+    await db.connect()
+    achievements_module.db = db
+    try:
+        await db.create_user(1)
+
+        fresh = await check_achievements(1)
+        check(not fresh, f"до первого квеста достижений нет: {fresh}")
+
+        await db.db.execute(
+            "UPDATE users SET quests_done = 1, correct = 1 WHERE tg_id = 1"
+        )
+        await db.db.commit()
+        fresh = await check_achievements(1)
+        check(len(fresh) == 1, f"первое достижение выдано: {fresh}")
+        check("Первый" in fresh[0], f"у достижения понятное название: {fresh[0]}")
+
+        again = await check_achievements(1)
+        check(not again, f"повторно не выдаётся: {again}")
+
+        await db.db.execute(
+            "UPDATE users SET best_streak = 7, pvp_wins = 1 WHERE tg_id = 1"
+        )
+        await db.db.commit()
+        fresh = await check_achievements(1)
+        check(len(fresh) == 3, f"серия (3 дня и неделя) и победа засчитаны: {fresh}")
+
+        earned, total = await achievements_module.achievements_summary(1)
+        check(earned == 4, f"всего получено: {earned}")
+        check(total == len(ACHIEVEMENTS), f"всего доступно: {total}")
+        titles = await achievements_module.achievements_list(1)
+        check(len(titles) == 4, f"список полученных: {titles}")
+    finally:
+        await db.close()
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -1245,6 +1290,7 @@ async def main() -> None:
     await test_cleanup_is_bounded()
     await test_streak_free()
     await test_pvp_rotator()
+    await test_achievements()
     await test_error_handler()
     await test_migration_old_db()
     await test_backup()

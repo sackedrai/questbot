@@ -273,6 +273,7 @@ async def main() -> None:
     import bot.daily as daily_module
     import bot.adaptive as adaptive_module
     import bot.pvp as pvp_module
+    import bot.achievements as achievements_module
 
     for module in (
         services_module,
@@ -284,6 +285,7 @@ async def main() -> None:
         daily_module,
         adaptive_module,
         pvp_module,
+        achievements_module,
     ):
         module.db = db
 

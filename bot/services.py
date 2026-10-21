@@ -17,7 +17,7 @@ from .config import (
 )
 from .content import total_items
 from .db import db, today_iso
-from .daily import STATE_ACTIVE, STATE_COOLDOWN, availability
+from .daily import STATE_ACTIVE, STATE_COOLDOWN, STATE_DUE, availability
 from .games import Quest, Render, get_game
 from .scoring import calculate_points, level_for_points
 from . import adaptive, style
@@ -270,6 +270,16 @@ async def backfill_item_keys() -> int:
     return fixed
 
 
+async def next_quest_line(tg_id: int) -> str:
+    """Строка профиля: когда следующий квест."""
+    avail = await availability(tg_id)
+    if avail.state == STATE_ACTIVE:
+        return "У тебя есть незаконченный квест"
+    if avail.state == STATE_DUE:
+        return "Доступен прямо сейчас"
+    return f"в {avail.human_due()}  ·  {avail.human_left()}"
+
+
 async def build_profile_text(tg_id: int) -> str:
     """Карточка профиля игрока."""
     user = await db.get_user(tg_id)
@@ -319,6 +329,8 @@ async def build_profile_text(tg_id: int) -> str:
                 ("", "Уникальных", f"{unique_items} из {total_items()}"),
             ]
         ),
+        style.section("⏳ СЛЕДУЮЩИЙ КВЕСТ"),
+        await next_quest_line(tg_id),
         style.section("⚔️ PvP"),
         style.stats(
             [
@@ -338,26 +350,44 @@ async def build_profile_text(tg_id: int) -> str:
 async def build_top_text(scope: str = "all", tg_id: Optional[int] = None) -> tuple[str, str]:
     """Карточка рейтинга. Возвращает (текст, scope)."""
     scope = scope if scope in SCOPE_TITLES else "all"
-    rows = await db.leaderboard(scope=scope, limit=10)
+    board = await db.leaderboard(scope=scope, limit=1000)
 
     parts = [style.header("🏆", "РЕЙТИНГ", SCOPE_TITLES[scope])]
 
-    if not rows:
+    if not board:
         parts.append(style.note("Пока никто ничего не заработал. Начни первым!"))
         return "\n".join(parts), scope
 
-    table_rows = []
-    for row in rows:
-        name = row["nickname"] or "Аноним"
-        points = row["scope_points"] if scope != "all" else row["total_points"]
-        table_rows.append((name, style.number(points)))
-    parts.append(style.leaderboard(table_rows))
+    def _points(row) -> str:
+        value = row["scope_points"] if scope != "all" else row["total_points"]
+        return style.number(value)
+
+    top_rows = [(row["nickname"] or "Аноним", _points(row)) for row in board[:10]]
+    parts.append(style.leaderboard(top_rows))
 
     if tg_id is not None:
-        place = await db.user_position(tg_id, scope)
+        place = 0
+        for index, row in enumerate(board, start=1):
+            if row["tg_id"] == tg_id:
+                place = index
+                break
         if place:
+            if place > len(top_rows):
+                # игрок вне топ-10 - показываем его соседей по рейтингу
+                start = max(1, place - 2)
+                window = board[start - 1: place + 2]
+                window_rows = [
+                    (row["nickname"] or "Аноним", _points(row)) for row in window
+                ]
+                parts.append("")
+                parts.append(style.note("Твои соседи:"))
+                parts.append(
+                    style.leaderboard(
+                        window_rows, start=start, highlight=place - start
+                    )
+                )
             parts.append("")
-            parts.append(f"👤 Твоё место: <b>{place}</b>")
+            parts.append(f"👤 Ты на <b>{place}</b>-м месте из {len(board)}")
 
     parts.append(style.footer())
     return "\n".join(parts), scope

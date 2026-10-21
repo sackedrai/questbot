@@ -914,6 +914,71 @@ async def test_migration_old_db() -> None:
         db_module.SCHEMA = original
 
 
+async def test_profile_and_top() -> None:
+    """Профиль: время следующего квеста. Рейтинг: место игрока и соседи."""
+    section("Профиль и рейтинг")
+
+    import bot.adaptive as adaptive
+    import bot.daily as daily
+    import bot.services as services
+
+    db = Database(":memory:")
+    await db.connect()
+    services.db = db
+    daily.db = db
+    adaptive.db = db
+
+    try:
+        # 12 игроков, у каждого свои очки
+        for i in range(1, 13):
+            await db.create_user(100 + i)
+            await db.set_nickname(100 + i, f"Игрок{i}")
+            await db.db.execute(
+                "UPDATE users SET points = ?, quests_done = ? WHERE tg_id = ?",
+                (1000 - i * 50, i, 100 + i),
+            )
+        await db.db.commit()
+
+        text, _ = await services.build_top_text("all", 112)
+        check("Ты на <b>12</b>-м месте из 12" in text, "указано место игрока")
+        check("Твои соседи" in text, "показаны соседи по рейтингу")
+        check("◀" in text, "строка игрока выделена")
+
+        text, _ = await services.build_top_text("all", 101)
+        check("Ты на <b>1</b>-м месте из 12" in text, "место лидера")
+        check("Твои соседи" not in text, "лидеру соседи не нужны")
+
+        # профиль: квест только что пройден - видно время ожидания
+        await db.create_user(200)
+        await db.set_nickname(200, "Тестер")
+        quest_id = await db.create_quest(
+            200, "2026-10-21", "quiz", "easy", {"q": "?"}
+        )
+        await db.finish_quest(quest_id, 20, "done")
+        await db.db.commit()
+        profile = await services.build_profile_text(200)
+        check("СЛЕДУЮЩИЙ КВЕСТ" in profile, "в профиле есть блок следующего квеста")
+        check("через" in profile, "видно, сколько ждать")
+
+        # квест положен давно - доступен прямо сейчас
+        await db.db.execute(
+            "UPDATE quests SET finished_at = ? WHERE id = ?",
+            (time.time() - 90000, quest_id),
+        )
+        await db.db.commit()
+        profile = await services.build_profile_text(200)
+        check("Доступен прямо сейчас" in profile, "квест доступен")
+
+        # есть незаконченный квест
+        await db.create_user(201)
+        await db.set_nickname(201, "Другой")
+        await db.create_quest(201, "2026-10-21", "quiz", "easy", {"q": "?"})
+        profile = await services.build_profile_text(201)
+        check("незаконченный квест" in profile, "сказано про незаконченный квест")
+    finally:
+        await db.close()
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -928,6 +993,7 @@ async def main() -> None:
     await test_rotator()
     await test_novice_level()
     await test_daily_pass_batch()
+    await test_profile_and_top()
     await test_migration_old_db()
     await test_backup()
     test_watchdog_logic()

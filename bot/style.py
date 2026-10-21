@@ -89,12 +89,26 @@ def medal(position: int) -> str:
     return f" {position}" if position < 10 else str(position)
 
 
-def leaderboard(rows: Iterable[tuple[str, str]], name_width: int = 20) -> str:
-    """Таблица рейтинга. Строки: (имя, значение)."""
+def leaderboard(
+    rows: Iterable[tuple[str, str]],
+    name_width: int = 20,
+    start: int = 1,
+    highlight: int | None = None,
+) -> str:
+    """Таблица рейтинга. Строки: (имя, значение).
+
+    ``start`` - место первой строки (для окна вокруг игрока).
+    ``highlight`` - индекс строки внутри таблицы, которую надо выделить.
+    """
     lines = []
-    for position, (name, value) in enumerate(rows, start=1):
-        marker = medal(position)
-        clean = name.replace("\n", " ").strip()[:name_width]
+    for offset, (name, value) in enumerate(rows, start=start):
+        marker = medal(offset)
+        clean = name.replace("\n", " ").strip()
+        if highlight is not None and offset - start == highlight:
+            # помечаем игрока, но ширину не трогаем - колонки остаются ровными
+            clean = ("◀ " + clean)[:name_width]
+        else:
+            clean = clean[:name_width]
         lines.append(f"{marker} {clean:<{name_width}}{value:>8}")
     if not lines:
         return "<i>пока пусто</i>"

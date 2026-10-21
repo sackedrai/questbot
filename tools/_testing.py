@@ -105,6 +105,12 @@ class FakeBot:
     async def send_message(self, chat_id: int, text: str, **kwargs) -> None:
         self.sent.append((chat_id, text))
 
+    async def me(self):
+        """Заглушка бота: его имя и id (для ссылок-приглашений)."""
+        from types import SimpleNamespace
+
+        return SimpleNamespace(username="questbot_bot", id=999)
+
 
 class FakeMessage:
     """Заглушка сообщения: собирает всё, что бот в него отправил."""

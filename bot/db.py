@@ -739,6 +739,30 @@ class Database:
         await self.db.commit()
         return int(cur.lastrowid)
 
+    async def count_open_challenges(self, tg_id: int, max_age: float = 3600.0) -> int:
+        """Сколько у игрока свежих непринятых вызовов."""
+        async with self.db.execute(
+            "SELECT COUNT(*) AS c FROM pvp_matches"
+            " WHERE player1 = ? AND status = 'waiting' AND created_at > ?",
+            (tg_id, time.time() - max_age),
+        ) as cur:
+            row = await cur.fetchone()
+        return int(row["c"]) if row else 0
+
+    async def expire_stale_challenges(self, max_age: float = 86400.0) -> int:
+        """Закрыть вызовы, которые так и не приняли.
+
+        Иначе в базе копится мусор: вызов можно было бы принять и через
+        месяц, и таких вызовов накапливаются десятки.
+        """
+        cur = await self.db.execute(
+            "UPDATE pvp_matches SET status = 'expired'"
+            " WHERE status = 'waiting' AND created_at < ?",
+            (time.time() - max_age,),
+        )
+        await self.db.commit()
+        return cur.rowcount or 0
+
     async def get_pvp_match(self, match_id: int) -> Optional[aiosqlite.Row]:
         async with self.db.execute(
             "SELECT * FROM pvp_matches WHERE id = ?", (match_id,)

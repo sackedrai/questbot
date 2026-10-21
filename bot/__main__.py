@@ -241,6 +241,14 @@ async def main() -> None:
     except Exception as exc:  # noqa: BLE001
         log.warning("Не удалось проставить ключи заданий: %r", exc)
 
+    # вызовы на бой, которые так и не приняли, - в мусор
+    try:
+        expired = await db.expire_stale_challenges()
+        if expired:
+            log.info("Закрыто старых непринятых вызовов: %s", expired)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Не удалось закрыть старые вызовы: %r", exc)
+
     try:
         drop_pending = os.getenv("DROP_PENDING_UPDATES", "1") not in ("0", "false", "no")
         try:

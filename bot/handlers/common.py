@@ -388,7 +388,10 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     elif action == "pvp":
         from .pvp import create_flow
 
-        await create_flow(callback.message, bot, edit=True)
+        # сообщение с меню написал бот, а вызов создаёт нажавший
+        await create_flow(
+            callback.message, bot, edit=True, player_id=callback.from_user.id
+        )
     elif action == "settings":
         from .settings import _settings_markup
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Optional
 
 from aiogram import Bot, Router
 from aiogram.filters import Command
@@ -10,7 +11,13 @@ from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..db import db
-from ..pvp import accept_challenge, create_challenge, player_name
+from ..keyboards import main_menu
+from ..pvp import (
+    ChallengeExists,
+    accept_challenge,
+    create_challenge,
+    player_name,
+)
 from ..services import start_quest
 from ..utils import auto_clean, open_screen, safe_edit
 from .. import style
@@ -23,13 +30,31 @@ async def _invite_link(bot: Bot, code: str) -> str:
     return f"https://t.me/{me.username}?start=pvp_{code}"
 
 
-async def create_flow(message: Message, bot: Bot, edit: bool = False) -> None:
+async def create_flow(
+    message: Message,
+    bot: Bot,
+    edit: bool = False,
+    player_id: Optional[int] = None,
+) -> None:
     """Создать вызов и отдать ссылку сопернику.
 
     ``edit`` - править текущее сообщение на месте (вызов из меню). Иначе
     отправляем новый экран, предварительно убрав прошлые.
+
+    ``player_id`` - кто создаёт вызов. Для кнопки в меню это нажавший
+    (``callback.from_user.id``): в сообщении с меню автор - бот, а не
+    игрок, и без этой поправки вызов создавался от имени бота.
     """
-    code = await create_challenge(message.from_user.id)
+    challenger = player_id if player_id is not None else message.from_user.id
+    try:
+        code = await create_challenge(challenger)
+    except ChallengeExists:
+        await message.answer(
+            style.note("У тебя уже есть открытый вызов. Дождись, пока его примут, "
+                       "или попробуй позже."),
+            reply_markup=main_menu(),
+        )
+        return
     link = await _invite_link(bot, code)
     builder = InlineKeyboardBuilder()
     builder.button(text="🔙 В меню", callback_data="menu:home")

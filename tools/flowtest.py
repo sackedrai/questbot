@@ -156,6 +156,49 @@ async def test_pvp(db: Database) -> None:
     pvp_module.GAME_TYPES = old_types
 
 
+async def test_pvp_from_menu(db: Database) -> None:
+    """Вызов на бой из меню создаёт нажавший, а не бот.
+
+    Регрессия: в сообщении с меню автор - бот, и код брал
+    message.from_user.id. Из-за этого все вызовы создавались от имени
+    бота, и принять их было невозможно.
+    """
+    print("\n--- Сценарий: вызов на бой из меню ---")
+    import bot.pvp as pvp_module
+    from bot.handlers import pvp as pvp_handlers
+
+    player = FakeUser(3101)
+    fake_bot = FakeBot()
+
+    await db.create_user(3101)
+    await db.set_nickname(3101, "Вызывающий")
+
+    old_types = pvp_module.GAME_TYPES
+    pvp_module.GAME_TYPES = ("quiz",)
+
+    # сообщение с меню написал бот - как и бывает на самом деле
+    menu_message = FakeMessage("/start", player)
+    menu_message.from_user = FakeUser(999, username="questbot_bot", full_name="QuestBot")
+
+    await pvp_handlers.create_flow(
+        menu_message, fake_bot, edit=True, player_id=player.id
+    )
+
+    rows = []
+    async with db.db.execute(
+        "SELECT player1, player2 FROM pvp_matches ORDER BY id DESC LIMIT 1"
+    ) as cur:
+        rows = list(await cur.fetchall())
+    check(bool(rows), "вызов создан")
+    if rows:
+        check(
+            rows[0]["player1"] == 3101,
+            f"вызов от нажавшего, а не от бота: {rows[0]['player1']}",
+        )
+
+    pvp_module.GAME_TYPES = old_types
+
+
 async def run_flow(db: Database, game_type: str) -> None:
     print(f"\n--- Сценарий: {game_type} ---")
     storage = MemoryStorage()
@@ -280,6 +323,7 @@ async def main() -> None:
             await run_flow(db, game_type)
         await test_failure(db)
         await test_pvp(db)
+        await test_pvp_from_menu(db)
     finally:
         await db.close()
 

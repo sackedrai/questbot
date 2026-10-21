@@ -27,12 +27,20 @@ GAME_TITLES = {
 }
 
 
+class ChallengeExists(RuntimeError):
+    """У игрока уже есть открытый вызов."""
+
+
 def make_code() -> str:
     return "".join(secrets.choice(CODE_ALPHABET) for _ in range(6))
 
 
 async def create_challenge(player1: int) -> str:
     """Создать вызов на бой и вернуть код для ссылки."""
+    # не плодим вызовы: если свежий уже есть - новый не создаём
+    if await db.count_open_challenges(player1, max_age=3600.0):
+        raise ChallengeExists("у игрока уже есть открытый вызов")
+
     game_type = random.choice(GAME_TYPES)
     difficulty = await adaptive.pick_difficulty(player1)
     game = get_game(game_type)

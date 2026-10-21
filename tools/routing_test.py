@@ -402,17 +402,29 @@ async def main() -> None:
                 break
     check(bool(code), f"код вызова создан: {code}")
 
-    # вызов из меню: сообщение переписывается на месте, второго окна нет
+    # вызов из меню: сообщение переписывается на месте, второго окна нет.
+    # Другой игрок - у первого уже есть открытый вызов (новые не плодим).
+    user_c = User(id=602, is_bot=False, first_name="Третий")
     session.calls.clear()
     msg_menu_pvp = Message(message_id=42, date=datetime.now(timezone.utc),
-                           chat=Chat(id=600, type="private"), from_user=user_a)
-    cq_pvp = CallbackQuery(id="cq_pvp", from_user=user_a, chat_instance="ci",
+                           chat=Chat(id=602, type="private"), from_user=user_c)
+    cq_pvp = CallbackQuery(id="cq_pvp", from_user=user_c, chat_instance="ci",
                            data="menu:pvp", message=msg_menu_pvp)
     await dp.feed_update(bot, Update(update_id=42, callback_query=cq_pvp))
     sent_pvp = [c for c in session.calls if isinstance(c, SendMessage)]
     edited_pvp = [c for c in session.calls if isinstance(c, EditMessageText)]
     check(not sent_pvp, f"вызов из меню не создаёт второго окна: {len(sent_pvp)}")
     check(edited_pvp, "вызов из меню переписан на месте")
+
+    # и вызов создаёт тот, кто нажал, а не автор сообщения с меню (бот)
+    async with db.db.execute(
+        "SELECT player1 FROM pvp_matches ORDER BY id DESC LIMIT 1"
+    ) as cur:
+        rows = list(await cur.fetchall())
+    check(
+        bool(rows) and rows[0]["player1"] == 602,
+        f"вызов от нажавшего, а не от бота: {rows[0]['player1'] if rows else None}",
+    )
 
     session.calls.clear()
     msg_acc = Message(message_id=41, date=datetime.now(timezone.utc),

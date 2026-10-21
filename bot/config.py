@@ -40,6 +40,10 @@ BASE_POINTS = {"easy": 10, "medium": 20, "hard": 30}
 STREAK_BONUS_PER_DAY = 0.05
 STREAK_BONUS_MAX_DAYS = 10
 
+# Защита серии: раз в сколько дней игрок может пропустить день,
+# не обнулив серию (как «заморозка» в Duolingo)
+STREAK_FREE_COOLDOWN_DAYS = 7
+
 # Скорость ответа в «быстром» квесте: (порог x1.5, порог x1.2) в секундах
 FAST_BONUS_SECONDS = (5.0, 15.0)
 

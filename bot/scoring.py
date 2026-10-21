@@ -60,16 +60,25 @@ def calculate_points(
     return int(round(base * multiplier)), rows
 
 
+def level_threshold(level: int) -> int:
+    """Сколько очков стоит переход с уровня level на следующий.
+
+    Первый уровень дешёвый: награда должна приходить быстро, иначе новый
+    игрок месяц видит «уровень 1». Дальше ступенька по 100 очков.
+    """
+    return 200 + (level - 1) * 100
+
+
 def level_for_points(points: int) -> tuple[int, int, int]:
     """Уровень по очкам.
 
     Возвращает (уровень, очки_в_уровне, очки_нужны_для_следующего).
     """
     level = 1
-    while points >= level * 500:
-        points -= level * 500
+    while points >= level_threshold(level):
+        points -= level_threshold(level)
         level += 1
-    return level, points, level * 500
+    return level, points, level_threshold(level)
 
 
 def progress_bar(current: int, total: int, width: int = 10) -> str:

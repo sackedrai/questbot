@@ -25,6 +25,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import ErrorEvent
 
 from .backup import restore_from_repo
 from .config import BOT_TOKEN, DB_PATH
@@ -33,6 +34,7 @@ from .handlers import router as main_router
 from .middleware import ErrorCounterMiddleware
 from .net import build_session, detect_channel
 from .selfcheck import self_check_loop
+from . import style
 
 log = logging.getLogger(__name__)
 
@@ -204,6 +206,9 @@ async def main() -> None:
     dp.message.middleware(ErrorCounterMiddleware())
     dp.callback_query.middleware(ErrorCounterMiddleware())
 
+    # Ошибка в обработчике не должна выглядеть как «бот замолчал»
+    dp.errors.register(handle_error)
+
     log.info(
         "Параметры прогона: MAX_RUN_MINUTES=%s DISPATCH_NEXT=%s DROP_PENDING_UPDATES=%s",
         os.getenv("MAX_RUN_MINUTES"),
@@ -269,6 +274,34 @@ async def main() -> None:
         log.info("Завершаюсь: запускаю следующий прогон")
         _dispatch_next_run()
         log.info("Завершился")
+
+
+async def handle_error(event: ErrorEvent) -> bool:
+    """Ошибка в обработчике не должна выглядеть как «бот замолчал».
+
+    Игроку честно говорим, что что-то сломалось. Счётчик ошибок при этом
+    уже посчитан middleware - сторож увидит и тревогу.
+    """
+    log.warning("Ошибка при обработке апдейта: %r", event.exception)
+    try:
+        if event.update.message is not None:
+            await event.update.message.answer(
+                "\n".join(
+                    [
+                        style.header("⚠️", "ЧТО-ТО СЛОМАЛОСЬ"),
+                        style.note(
+                            "Попробуй ещё раз — если не выйдет, напиши хозяину бота."
+                        ),
+                    ]
+                )
+            )
+        elif event.update.callback_query is not None:
+            await event.update.callback_query.answer(
+                "Что-то сломалось, попробуй ещё раз", show_alert=True
+            )
+    except Exception:  # noqa: BLE001 - сообщение об ошибке не должно её усугубить
+        log.debug("Не удалось сообщить игроку об ошибке", exc_info=True)
+    return True
 
 
 async def _backup_database() -> None:

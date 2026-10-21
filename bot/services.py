@@ -220,15 +220,16 @@ async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
             [("", label, value) for label, value in breakdown],
             total=("ИТОГО", style.points_line(points)),
         )
-        summary = "\n".join(
-            [
-                style.header("🏆", "КВЕСТ ПРОЙДЕН!"),
-                table,
-                "",
-                f"🔥 Серия: <b>{streak}</b> дн.  ·  "
-                f"Сегодня: <b>{style.number(day_points)}</b> очков",
-            ]
-        )
+        lines = [
+            style.header("🏆", "КВЕСТ ПРОЙДЕН!"),
+            table,
+            "",
+            f"🔥 Серия: <b>{streak}</b> дн.  ·  "
+            f"Сегодня: <b>{style.number(day_points)}</b> очков",
+        ]
+        if not is_pvp and await db.streak_free_used_today(quest.tg_id, quest.day):
+            lines.append(style.note("🛡 Защита серии сработала — пропущенный день не обнулил её."))
+        summary = "\n".join(lines)
     else:
         if points < 0:
             tail = (
@@ -297,6 +298,7 @@ async def build_profile_text(tg_id: int) -> str:
     best_day = await db.best_day_points(tg_id)
     adaptive_level = await adaptive.current_level(tg_id)
     unique_items = await db.count_used_items(tg_id)
+    free_ready = await db.streak_free_available(tg_id)
 
     parts = [
         style.header("👤", "ПРОФИЛЬ", f"{nickname}  ·  🎖 уровень {level}"),
@@ -318,6 +320,7 @@ async def build_profile_text(tg_id: int) -> str:
             [
                 ("", "Текущая", f"{user['streak']} дн."),
                 ("", "Рекорд", f"{user['best_streak']} дн."),
+                ("", "Защита", "доступна" if free_ready else "использована"),
             ]
         ),
         style.section("🎯 СТАТИСТИКА"),

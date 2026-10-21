@@ -36,7 +36,9 @@ async def create_challenge(player1: int) -> str:
     game_type = random.choice(GAME_TYPES)
     difficulty = await adaptive.pick_difficulty(player1)
     game = get_game(game_type)
-    payload = await game.build(difficulty, random.Random())
+    # ротатор: вызывающему не выдаём то, что он уже проходил
+    used = await db.used_item_keys(player1)
+    payload = await game.build(difficulty, random.Random(), exclude=used)
 
     for _ in range(8):
         code = make_code()

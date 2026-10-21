@@ -104,6 +104,10 @@ def test_scoring() -> None:
 
     level, in_level, need = level_for_points(0)
     check(level == 1, f"нулевой уровень: {level}")
+    check(need == 200, f"до второго уровня 200 очков: {need}")
+    check(level_for_points(199)[0] == 1, "199 очков - ещё первый уровень")
+    check(level_for_points(200)[0] == 2, "200 очков - второй уровень")
+    check(level_for_points(500)[0] == 3, "500 очков - третий уровень")
     level2, _, _ = level_for_points(1500)
     check(level2 > 1, f"уровень растёт: {level2}")
     check(progress_bar(5, 10) == "█████░░░░░", "полоска прогресса считается")
@@ -1101,6 +1105,127 @@ async def test_cleanup_is_bounded() -> None:
         await db.close()
 
 
+async def test_streak_free() -> None:
+    """Защита серии: один пропущенный день не обнуляет серию."""
+    section("Защита серии")
+
+    db = Database(":memory:")
+    await db.connect()
+    try:
+        await db.create_user(1)
+        for day in ("2026-10-01", "2026-10-02", "2026-10-03"):
+            await db.touch_day(1, day)
+        user = await db.get_user(1)
+        check(user["streak"] == 3, f"серия растёт: {user['streak']}")
+
+        # пропустили 4 октября, пришли 5-го - защита сработала
+        streak = await db.touch_day(1, "2026-10-05")
+        check(streak == 4, f"защита сохранила серию: {streak}")
+        check(await db.streak_free_used_today(1, "2026-10-05"), "защита отмечена")
+        check(
+            not await db.streak_free_available(1, "2026-10-06"),
+            "защита на перезарядке",
+        )
+        check(
+            await db.streak_free_available(1, "2026-10-12"),
+            "через неделю защита снова доступна",
+        )
+
+        # без защиты серия обнуляется
+        await db.create_user(2)
+        for day in ("2026-10-01", "2026-10-02", "2026-10-03"):
+            await db.touch_day(2, day)
+        await db.db.execute(
+            "UPDATE users SET streak_free_day = '2026-10-09' WHERE tg_id = 2"
+        )
+        await db.db.commit()
+        streak = await db.touch_day(2, "2026-10-05")
+        check(streak == 1, f"без защиты серия обнулилась: {streak}")
+
+        # два пропущенных дня - защита одна, серия обнуляется
+        await db.create_user(3)
+        for day in ("2026-10-01", "2026-10-02"):
+            await db.touch_day(3, day)
+        streak = await db.touch_day(3, "2026-10-06")
+        check(streak == 1, f"два пропущенных дня обнуляют серию: {streak}")
+    finally:
+        await db.close()
+
+
+async def test_pvp_rotator() -> None:
+    """Вызов на бой не выдаёт то, что игрок уже проходил."""
+    section("Ротатор в PvP")
+
+    import json
+
+    import bot.adaptive as adaptive_module
+    import bot.pvp as pvp_module
+    from bot.content import RIDDLES
+    from bot.pvp import create_challenge
+
+    db = Database(":memory:")
+    await db.connect()
+    pvp_module.db = db
+    adaptive_module.db = db
+    pvp_module.GAME_TYPES = ("riddle",)
+    try:
+        await db.create_user(1)
+        # половина загадок "уже пройдена"
+        for item in RIDDLES[:15]:
+            await db.create_quest(
+                1,
+                "2026-10-01",
+                "riddle",
+                "easy",
+                {"q": item["q"]},
+                item_key=f"riddle:{item['q']}",
+            )
+
+        code = await create_challenge(1)
+        match = await db.get_pvp_by_code(code)
+        payload = json.loads(match["payload"])
+        used = {f"riddle:{item['q']}" for item in RIDDLES[:15]}
+        check(payload["_key"] not in used, f"вызов не выдал пройденное: {payload['_key']}")
+        check(
+            payload["_key"].startswith("riddle:"),
+            f"у вызова есть ключ задания: {payload['_key']}",
+        )
+    finally:
+        await db.close()
+
+
+async def test_error_handler() -> None:
+    """Ошибка в обработчике: игроку отвечают, а не молчат."""
+    section("Ошибки видны игроку")
+
+    from datetime import datetime, timezone
+    from unittest.mock import AsyncMock, patch
+
+    from aiogram.types import Chat, ErrorEvent, Message as AiogramMessage
+    from aiogram.types import Update, User
+
+    from bot.__main__ import handle_error
+
+    msg = AiogramMessage(
+        message_id=1,
+        date=datetime.now(timezone.utc),
+        chat=Chat(id=5, type="private"),
+        from_user=User(id=5, is_bot=False, first_name="И"),
+        text="привет",
+    )
+    event = ErrorEvent(
+        update=Update(update_id=1, message=msg),
+        exception=RuntimeError("сломалось"),
+    )
+
+    with patch.object(AiogramMessage, "answer", new=AsyncMock()) as answer:
+        result = await handle_error(event)
+    check(result is True, "обработчик ошибок отработал")
+    check(answer.await_count == 1, f"игроку ответили: {answer.await_count}")
+    text = answer.await_args.args[0] if answer.await_args else ""
+    check("СЛОМАЛОСЬ" in text, f"в ответе есть понятное объяснение: {text[:60]}")
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -1118,6 +1243,9 @@ async def main() -> None:
     await test_profile_and_top()
     await test_auto_clean()
     await test_cleanup_is_bounded()
+    await test_streak_free()
+    await test_pvp_rotator()
+    await test_error_handler()
     await test_migration_old_db()
     await test_backup()
     test_watchdog_logic()

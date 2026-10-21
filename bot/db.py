@@ -89,6 +89,7 @@ MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("pvp_wins", "INTEGER DEFAULT 0"),
         ("pvp_losses", "INTEGER DEFAULT 0"),
         ("pvp_points", "INTEGER DEFAULT 0"),
+        ("streak_free_day", "TEXT DEFAULT ''"),
     ],
     "quests": [
         ("pvp_id", "INTEGER DEFAULT 0"),
@@ -214,7 +215,8 @@ class Database:
         """Отметить игру за сегодня и вернуть актуальную длину серии.
 
         Повторный квест в тот же день серию не увеличивает. Если день
-        пропущен — серия начинается заново.
+        пропущен - серия начинается заново, кроме случая, когда игрок
+        пропустил ровно один день и у него доступна защита серии.
         """
         user = await self.get_user(tg_id)
         if user is None:
@@ -224,7 +226,17 @@ class Database:
         last_day = user["last_quest_day"]
         if last_day != day:
             yesterday = (date.fromisoformat(day) - timedelta(days=1)).isoformat()
-            streak = streak + 1 if last_day == yesterday else 1
+            if last_day == yesterday:
+                streak = streak + 1
+            else:
+                missed_one = last_day == (
+                    date.fromisoformat(day) - timedelta(days=2)
+                ).isoformat()
+                if missed_one and await self._take_streak_free(tg_id, day):
+                    # пропущен один день, но защита сработала
+                    streak = streak + 1
+                else:
+                    streak = 1
             await self.db.execute(
                 "UPDATE users SET streak = ?, best_streak = MAX(best_streak, ?),"
                 " last_quest_day = ? WHERE tg_id = ?",
@@ -232,6 +244,53 @@ class Database:
             )
             await self.db.commit()
         return streak
+
+    async def _take_streak_free(self, tg_id: int, day: str) -> bool:
+        """Потратить защиту серии, если она доступна. Возвращает True, если потратили."""
+        from .config import STREAK_FREE_COOLDOWN_DAYS
+
+        user = await self.get_user(tg_id)
+        if user is None:
+            return False
+        last_used = user["streak_free_day"] or ""
+        if last_used:
+            try:
+                used = date.fromisoformat(last_used)
+            except ValueError:
+                used = None
+            if used is not None:
+                cooldown = (date.fromisoformat(day) - used).days
+                if cooldown < STREAK_FREE_COOLDOWN_DAYS:
+                    return False
+        await self.db.execute(
+            "UPDATE users SET streak_free_day = ? WHERE tg_id = ?", (day, tg_id)
+        )
+        await self.db.commit()
+        return True
+
+    async def streak_free_available(self, tg_id: int, today: Optional[str] = None) -> bool:
+        """Доступна ли защита серии (не использована за последние дни)."""
+        from .config import STREAK_FREE_COOLDOWN_DAYS
+
+        user = await self.get_user(tg_id)
+        if user is None:
+            return False
+        last_used = user["streak_free_day"] or ""
+        if not last_used:
+            return True
+        try:
+            used = date.fromisoformat(last_used)
+        except ValueError:
+            return True
+        day = date.fromisoformat(today) if today else date.today()
+        return (day - used).days >= STREAK_FREE_COOLDOWN_DAYS
+
+    async def streak_free_used_today(self, tg_id: int, day: str) -> bool:
+        """Использовалась ли сегодня защита серии."""
+        user = await self.get_user(tg_id)
+        if user is None:
+            return False
+        return (user["streak_free_day"] or "") == day
 
     async def add_result(
         self,

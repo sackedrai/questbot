@@ -215,6 +215,10 @@ async def main() -> None:
         os.getenv("DISPATCH_NEXT"),
         os.getenv("DROP_PENDING_UPDATES"),
     )
+    # сам id админа не пишем: логи прогона видны всем
+    from .config import ADMIN_CHAT_ID
+
+    log.info("Админка: %s", "включена" if ADMIN_CHAT_ID else "выключена (нет ADMIN_CHAT_ID)")
 
     # если кэш Actions потерялся - берём базу из репозитория (зашифрованную)
     try:

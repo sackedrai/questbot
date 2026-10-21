@@ -21,6 +21,7 @@ for stream in (sys.stdout, sys.stderr):
 from bot import style  # noqa: E402
 from bot.config import DIFFICULTY_TITLES  # noqa: E402
 from bot.db import Database  # noqa: E402
+from tools._testing import patch_db  # noqa: E402
 from bot.games import Quest, get_game  # noqa: E402
 from bot.handlers.common import HELP_TEXT, WELCOME_TEXT  # noqa: E402
 from bot.services import build_profile_text, build_top_text  # noqa: E402
@@ -44,13 +45,8 @@ async def main() -> None:
     db = Database(":memory:")
     await db.connect()
 
-    import bot.services as services_module
-    import bot.adaptive as adaptive_module
-    import bot.daily as daily_module
-    import bot.pvp as pvp_module
 
-    for module in (services_module, adaptive_module, daily_module, pvp_module):
-        module.db = db
+    patch_db(db)
 
     try:
         await _render(db)

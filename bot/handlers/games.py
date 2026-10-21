@@ -17,7 +17,9 @@ router = Router()
 
 
 @router.callback_query(F.data.startswith("g:"))
-async def on_game_callback(callback: CallbackQuery, state: FSMContext) -> None:
+async def on_game_callback(
+    callback: CallbackQuery, state: FSMContext, bot: Bot
+) -> None:
     parts = callback.data.split(":")
     if len(parts) != 3:
         await callback.answer()

@@ -13,7 +13,7 @@ from typing import Any
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .. import style
-from .base import BaseGame, Quest, Render, add_skip, pick_unseen
+from .base import BaseGame, Quest, Render, add_skip
 
 
 def _make_problem(

@@ -43,7 +43,7 @@ from aiogram.methods import (  # noqa: E402
 
 from bot.db import Database  # noqa: E402
 from bot.middleware import ErrorCounterMiddleware  # noqa: E402
-from bot.handlers import common, games, profile, quests, ranking  # noqa: E402
+from tools._testing import patch_db  # noqa: E402
 
 PASSED = 0
 FAILED = 0
@@ -132,29 +132,10 @@ async def main() -> None:
     # тестовая БД
     db = Database(":memory:")
     await db.connect()
-    import bot.handlers.common as common_module
-    import bot.handlers.games as games_module
-    import bot.handlers.profile as profile_module
-    import bot.handlers.quests as quests_module
-    import bot.handlers.ranking as ranking_module
     import bot.services as services_module
-    import bot.daily as daily_module
-    import bot.adaptive as adaptive_module
-    import bot.pvp as pvp_module
-    import bot.selfcheck as selfcheck_module
-    import bot.middleware as middleware_module
-    import bot.achievements as achievements_module
     import bot.admin as admin_module
-    import bot.handlers.pvp as pvp_handlers_module
-    import bot.handlers.settings as settings_handlers_module
 
-    for module in (services_module, common_module, games_module,
-                   profile_module, quests_module, ranking_module,
-                   daily_module, adaptive_module, pvp_module,
-                   selfcheck_module, middleware_module,
-                   pvp_handlers_module, settings_handlers_module,
-                   achievements_module, admin_module):
-        module.db = db
+    patch_db(db)
 
     session = MockSession()
     bot = None
@@ -225,7 +206,6 @@ async def main() -> None:
 
     # --- 5. полный цикл текстовой игры через диспетчер ---
     # отдельный игрок: у 555 уже есть пройденный квест, значит кулдаун 24ч
-    import bot.services as services_module
 
     services_module.GAME_TYPES = ("riddle",)
     session.calls.clear()
@@ -340,7 +320,6 @@ async def main() -> None:
     check(41 not in deleted, f"само меню осталось: {sorted(deleted)[:8]}")
 
     # --- 8.2. админка: обычному игроку нельзя, админу можно ---
-    import bot.admin as admin_module
 
     old_admin = admin_module.ADMIN_IDS
     admin_module.ADMIN_IDS = ()

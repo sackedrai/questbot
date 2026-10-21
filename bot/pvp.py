@@ -11,9 +11,7 @@ import secrets
 
 from . import adaptive
 from .db import db
-from .games import get_game
-
-GAME_TYPES = ("quiz", "fast", "timeline", "riddle", "word", "truth", "math")
+from .games import GAME_TYPES, get_game
 
 # Без похожих символов (0/O, 1/I), чтобы код можно было продиктовать
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"

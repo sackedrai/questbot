@@ -28,7 +28,11 @@ GAMES: dict[str, type[BaseGame]] = {
 TEXT_GAMES = ("riddle", "word")
 
 # Игры, где решает скорость ответа
-TIMED_GAMES = ("fast",)
+TIMED_GAMES = ("fast", "math")
+
+# Порядок выбора случайной мини-игры. Единственный источник: и сервис
+# выдачи квестов, и PvP берут список отсюда.
+GAME_TYPES = ("quiz", "fast", "timeline", "riddle", "word", "truth", "math")
 
 
 def get_game(game_type: str) -> type[BaseGame]:

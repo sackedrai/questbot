@@ -27,87 +27,22 @@ from aiogram.fsm.storage.memory import MemoryStorage  # noqa: E402
 from bot.db import Database  # noqa: E402
 from bot.games import GAMES  # noqa: E402
 from bot.handlers import common, games, profile, quests, ranking  # noqa: E402
-from bot.services import GAME_TYPES  # noqa: E402
 from bot.states import Onboarding  # noqa: E402
-
-PASSED = 0
-FAILED = 0
-
-
-def check(condition: bool, label: str) -> None:
-    global PASSED, FAILED
-    if condition:
-        PASSED += 1
-        print(f"  ok   {label}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}")
+from tools._testing import (  # noqa: E402
+    FakeBot,
+    FakeCallback,
+    FakeMessage,
+    FakeUser,
+    Tally,
+    patch_db,
+)
 
 
-class FakeUser:
-    def __init__(self, tg_id: int, username: str = "tester", full_name: str = "Тестер"):
-        self.id = tg_id
-        self.username = username
-        self.full_name = full_name
+TALLY = Tally()
+check = TALLY.check
 
 
-class FakeChat:
-    def __init__(self, chat_id: int):
-        self.id = chat_id
-        self.type = "private"
 
-
-class FakeBot:
-    """Заглушка бота: умеет удалять сообщения."""
-
-    def __init__(self) -> None:
-        self.deleted: list[tuple[int, int]] = []
-        self.deleted_chunks: list[tuple[int, list[int]]] = []
-
-    async def delete_message(self, chat_id: int, message_id: int) -> None:
-        self.deleted.append((chat_id, message_id))
-
-    async def delete_messages(self, chat_id: int, message_ids: list[int]) -> None:
-        self.deleted_chunks.append((chat_id, list(message_ids)))
-        for message_id in message_ids:
-            self.deleted.append((chat_id, message_id))
-
-
-class FakeMessage:
-    """Заглушка сообщения: собирает всё, что бот отправил."""
-
-    def __init__(self, text: str, user: FakeUser):
-        self.text = text
-        self.from_user = user
-        self.chat = FakeChat(user.id)
-        self.message_id = 1
-        self.sent: list[tuple[str, object]] = []
-        self.edited: list[tuple[str, object]] = []
-
-    async def answer(self, text: str, reply_markup=None, **kwargs):
-        self.sent.append((text, reply_markup))
-        return self
-
-    async def edit_text(self, text: str, reply_markup=None, **kwargs):
-        self.edited.append((text, reply_markup))
-        return self
-
-    @property
-    def last_text(self) -> str:
-        if self.sent:
-            return self.sent[-1][0]
-        return self.edited[-1][0] if self.edited else ""
-
-
-class FakeCallback:
-    def __init__(self, data: str, user: FakeUser, message: FakeMessage):
-        self.data = data
-        self.from_user = user
-        self.message = message
-        self.answers: list[str | None] = []
-
-    async def answer(self, text: str | None = None, show_alert: bool = False, **kwargs):
-        self.answers.append(text)
 
 
 async def play_quest(
@@ -130,7 +65,9 @@ async def play_quest(
 
     if game_type in ("quiz", "fast"):
         await games.on_game_callback(
-            FakeCallback(f"g:{quest_id}:{payload['correct']}", user, message), state
+            FakeCallback(f"g:{quest_id}:{payload['correct']}", user, message),
+            state,
+            fake_bot,
         )
     elif game_type == "timeline":
         items = payload["items"]
@@ -142,7 +79,9 @@ async def play_quest(
                 break
             pick = min(remaining, key=lambda i: items[i]["year_num"])
             await games.on_game_callback(
-                FakeCallback(f"g:{quest_id}:{pick}", user, message), state
+                FakeCallback(f"g:{quest_id}:{pick}", user, message),
+                state,
+                fake_bot,
             )
     elif game_type == "riddle":
         await games.on_game_text(FakeMessage(payload["answers"][0], user), state)
@@ -151,12 +90,70 @@ async def play_quest(
     elif game_type == "truth":
         choice = "t" if payload["a"] else "f"
         await games.on_game_callback(
-            FakeCallback(f"g:{quest_id}:{choice}", user, message), state
+            FakeCallback(f"g:{quest_id}:{choice}", user, message),
+            state,
+            fake_bot,
         )
     elif game_type == "math":
         await games.on_game_callback(
-            FakeCallback(f"g:{quest_id}:{payload['correct']}", user, message), state
+            FakeCallback(f"g:{quest_id}:{payload['correct']}", user, message),
+            state,
+            fake_bot,
         )
+
+
+async def test_pvp(db: Database) -> None:
+    """Матч PvP: квест выдаётся обоим, результат объявляется обоим.
+
+    Регрессия: в обработчике игровых кнопок не было параметра bot, и
+    ветка PvP падала с NameError в момент объявления результата.
+    """
+    print("\n--- Сценарий: PvP ---")
+    import json
+
+    import bot.pvp as pvp_module
+    from bot.handlers import pvp as pvp_handlers
+
+    storage = MemoryStorage()
+    user_a = FakeUser(3001)
+    user_b = FakeUser(3002)
+    state = FSMContext(storage=storage, key=user_a.id)
+    fake_bot = FakeBot()
+
+    await db.create_user(3001)
+    await db.set_nickname(3001, "Первый")
+    await db.create_user(3002)
+    await db.set_nickname(3002, "Второй")
+
+    # берём викторину: у неё есть готовый "correct", загадка отвечается текстом
+    old_types = pvp_module.GAME_TYPES
+    pvp_module.GAME_TYPES = ("quiz",)
+
+    # вызов от первого, принятие вторым
+    code = await pvp_module.create_challenge(3001)
+    check(bool(code), f"код вызова создан: {code}")
+
+    accept_msg = FakeMessage(f"/start pvp_{code}", user_b)
+    await pvp_handlers.accept_flow(accept_msg, fake_bot, code)
+
+    for player in (3001, 3002):
+        row = await db.get_active_quest(player)
+        check(row is not None, f"у игрока {player} есть квест матча")
+    check(len(fake_bot.sent) >= 2, f"квест отправлен обоим: {len(fake_bot.sent)}")
+
+    # первый игрок отвечает - должен сработать путь PvP
+    row = await db.get_active_quest(3001)
+    payload = json.loads(row["payload"])
+    message = FakeMessage("/quest", user_a)
+    await games.on_game_callback(
+        FakeCallback(f"g:{row['id']}:{payload['correct']}", user_a, message),
+        state,
+        fake_bot,
+    )
+
+    announced = [chat for chat, _ in fake_bot.sent]
+    check(3002 in announced, f"сопернику объявили результат: {announced}")
+    pvp_module.GAME_TYPES = old_types
 
 
 async def run_flow(db: Database, game_type: str) -> None:
@@ -252,7 +249,9 @@ async def test_failure(db: Database) -> None:
     wrong_index = (payload["correct"] + 1) % len(payload["options"])
 
     await games.on_game_callback(
-        FakeCallback(f"g:{quest_row['id']}:{wrong_index}", user, message), state
+        FakeCallback(f"g:{quest_row['id']}:{wrong_index}", user, message),
+        state,
+        fake_bot,
     )
 
     row = await db.get_user(user.id)
@@ -273,42 +272,21 @@ async def main() -> None:
     db = Database(":memory:")
     await db.connect()
 
-    import bot.handlers.common as common_module
-    import bot.handlers.games as games_module
-    import bot.handlers.profile as profile_module
-    import bot.handlers.quests as quests_module
-    import bot.handlers.ranking as ranking_module
-    import bot.services as services_module
-    import bot.daily as daily_module
-    import bot.adaptive as adaptive_module
-    import bot.pvp as pvp_module
-    import bot.achievements as achievements_module
 
-    for module in (
-        services_module,
-        common_module,
-        games_module,
-        profile_module,
-        quests_module,
-        ranking_module,
-        daily_module,
-        adaptive_module,
-        pvp_module,
-        achievements_module,
-    ):
-        module.db = db
+    patch_db(db)
 
     try:
         for game_type in GAMES:
             await run_flow(db, game_type)
         await test_failure(db)
+        await test_pvp(db)
     finally:
         await db.close()
 
     print("\n" + "=" * 56)
-    print(f"  Пройдено: {PASSED}   Провалено: {FAILED}")
+    print(TALLY.summary())
     print("=" * 56)
-    sys.exit(1 if FAILED else 0)
+    sys.exit(1 if TALLY.failed else 0)
 
 
 if __name__ == "__main__":

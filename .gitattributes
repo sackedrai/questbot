@@ -1,0 +1,11 @@
+# Переносы строк - всегда LF, независимо от настроек системы и редактора.
+# Раньше часть файлов приходила с CRLF, и правки по тексту не находились.
+* text=auto eol=lf
+
+# Скрипты для Windows запускаются cmd.exe - там нужны CRLF.
+*.bat text eol=crlf
+
+#diff для Python
+*.py text diff=python
+*.md text diff=markdown
+*.yml text diff=yaml

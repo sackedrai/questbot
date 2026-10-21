@@ -6,12 +6,16 @@
 
 from __future__ import annotations
 
-import io
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery, Message
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    Message,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from .. import admin as admin_mod
@@ -195,9 +199,13 @@ async def _admin_home_text(viewer_id: int | None = None) -> str:
 async def _edit(
     callback: CallbackQuery,
     text: str,
-    markup=None,
+    markup: InlineKeyboardMarkup,
 ) -> None:
-    """Перерисовать сообщение админки."""
+    """Перерисовать сообщение админки.
+
+    ``markup`` обязателен: экран без кнопок - это тупик, из которого
+    некуда выйти. Лучше TypeError при разработке, чем жалоба в игре.
+    """
     try:
         await callback.message.edit_text(text, reply_markup=markup)
     except Exception:  # noqa: BLE001 - сообщение могло не измениться

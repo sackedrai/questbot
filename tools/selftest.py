@@ -26,24 +26,15 @@ from bot.config import BASE_POINTS  # noqa: E402
 from bot.db import Database  # noqa: E402
 from bot.games import GAMES, Quest, get_game  # noqa: E402
 from bot.scoring import calculate_points, level_for_points, progress_bar  # noqa: E402
+from tools._testing import Tally, patch_db  # noqa: E402
 
 PASSED = 0
 FAILED = 0
 
 
-def check(condition: bool, label: str) -> None:
-    global PASSED, FAILED
-    if condition:
-        PASSED += 1
-        print(f"  ok   {label}")
-    else:
-        FAILED += 1
-        print(f"  FAIL {label}")
-
-
-def section(title: str) -> None:
-    print(f"\n{title}")
-    print("-" * len(title))
+TALLY = Tally()
+check = TALLY.check
+section = TALLY.section
 
 
 def test_content() -> None:
@@ -350,7 +341,7 @@ async def test_tracking_session() -> None:
     original_db = net_module.db
     db = Database(":memory:")
     await db.connect()
-    net_module.db = db
+    patch_db(db)
 
     original = aiohttp_session.AiohttpSession.make_request
 
@@ -382,7 +373,7 @@ async def test_daily_logic() -> None:
 
     db = Database(":memory:")
     await db.connect()
-    daily.db = db
+    patch_db(db)
     await db.create_user(1)
 
     avail = await daily.availability(1)
@@ -439,7 +430,7 @@ async def test_adaptive_and_notify() -> None:
 
     db = Database(":memory:")
     await db.connect()
-    adaptive.db = db
+    patch_db(db)
     await db.create_user(1)
 
     level = await adaptive.pick_difficulty(1, random.Random(1))
@@ -668,17 +659,15 @@ async def test_rotator() -> None:
 
     import random
 
-    import bot.adaptive as adaptive
-    import bot.daily as daily
     import bot.services as services
     from bot.games import get_game
     from bot.games.base import pick_unseen
 
     db = Database(":memory:")
     await db.connect()
-    services.db = db
-    daily.db = db
-    adaptive.db = db
+    patch_db(db)
+    patch_db(db)
+    patch_db(db)
 
     try:
         # чистый помощник: пока пул не исчерпан - берём непроходимое
@@ -765,7 +754,7 @@ async def test_novice_level() -> None:
 
     db = Database(":memory:")
     await db.connect()
-    adaptive.db = db
+    patch_db(db)
     await db.create_user(1)
 
     try:
@@ -796,9 +785,7 @@ async def test_daily_pass_batch() -> None:
     """Массовый обход: квесты выдаются тем, кому положено."""
     section("Массовая раздача квестов")
 
-    import bot.adaptive as adaptive
     import bot.daily as daily
-    import bot.services as services
 
     class FakeBot:
         def __init__(self) -> None:
@@ -809,9 +796,9 @@ async def test_daily_pass_batch() -> None:
 
     db = Database(":memory:")
     await db.connect()
-    daily.db = db
-    services.db = db
-    adaptive.db = db
+    patch_db(db)
+    patch_db(db)
+    patch_db(db)
 
     try:
         # игрок, которому квест положен давно
@@ -944,17 +931,14 @@ async def test_profile_and_top() -> None:
     """Профиль: время следующего квеста. Рейтинг: место игрока и соседи."""
     section("Профиль и рейтинг")
 
-    import bot.adaptive as adaptive
-    import bot.achievements as achievements_module
-    import bot.daily as daily
     import bot.services as services
 
     db = Database(":memory:")
     await db.connect()
-    services.db = db
-    daily.db = db
-    adaptive.db = db
-    achievements_module.db = db
+    patch_db(db)
+    patch_db(db)
+    patch_db(db)
+    patch_db(db)
 
     try:
         # 12 игроков, у каждого свои очки
@@ -1066,10 +1050,9 @@ async def test_auto_clean() -> None:
 
         from aiogram.types import Chat, Message, User
 
-        import bot.middleware as middleware_module
         from bot.middleware import ErrorCounterMiddleware
 
-        middleware_module.db = db
+        patch_db(db)
         middleware = ErrorCounterMiddleware()
 
         async def _handler(event, data):
@@ -1182,15 +1165,14 @@ async def test_pvp_rotator() -> None:
 
     import json
 
-    import bot.adaptive as adaptive_module
     import bot.pvp as pvp_module
     from bot.content import RIDDLES
     from bot.pvp import create_challenge
 
     db = Database(":memory:")
     await db.connect()
-    pvp_module.db = db
-    adaptive_module.db = db
+    patch_db(db)
+    patch_db(db)
     pvp_module.GAME_TYPES = ("riddle",)
     try:
         await db.create_user(1)
@@ -1259,7 +1241,7 @@ async def test_achievements() -> None:
 
     db = Database(":memory:")
     await db.connect()
-    achievements_module.db = db
+    patch_db(db)
     try:
         await db.create_user(1)
 
@@ -1297,13 +1279,12 @@ async def test_achievements_screen() -> None:
     """Экран достижений: полученные, закрытые и подсказка."""
     section("Экран достижений")
 
-    import bot.achievements as achievements_module
     from bot.achievements import build_achievements_text
     from bot.keyboards import main_menu
 
     db = Database(":memory:")
     await db.connect()
-    achievements_module.db = db
+    patch_db(db)
     try:
         await db.create_user(1)
         await db.grant_achievement(1, "first_quest")
@@ -1356,7 +1337,7 @@ async def test_admin_panel() -> None:
 
     db = Database(":memory:")
     await db.connect()
-    admin_module.db = db
+    patch_db(db)
 
     class FakeBot:
         def __init__(self) -> None:
@@ -1487,7 +1468,7 @@ async def test_admin_list() -> None:
 
     db = Database(":memory:")
     await db.connect()
-    admin_module.db = db
+    patch_db(db)
 
     old_ids = admin_module.ADMIN_IDS
     try:
@@ -1546,9 +1527,9 @@ async def main() -> None:
     await test_error_counter()
 
     print("\n" + "=" * 56)
-    print(f"  Пройдено: {PASSED}   Провалено: {FAILED}")
+    print(TALLY.summary())
     print("=" * 56)
-    sys.exit(1 if FAILED else 0)
+    sys.exit(1 if TALLY.failed else 0)
 
 
 if __name__ == "__main__":

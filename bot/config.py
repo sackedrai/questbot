@@ -17,6 +17,7 @@ DB_PATH: str = os.getenv("DB_PATH", str(BASE_DIR / "data" / "questbot.db"))
 # Можно перечислить несколько через запятую: "111,222".
 # Пусто - админки нет, никто не сможет ею воспользоваться.
 ADMIN_CHAT_ID: str = os.getenv("ADMIN_CHAT_ID", "").strip()
+# Несколько админов - через запятую: "123,456"
 ADMIN_IDS: tuple[int, ...] = tuple(
     int(part) for part in ADMIN_CHAT_ID.replace(",", " ").split() if part.isdigit()
 )

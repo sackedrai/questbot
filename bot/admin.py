@@ -14,13 +14,12 @@ from __future__ import annotations
 
 import csv
 import io
-from typing import Any, Optional
 
 from aiogram import Bot
 
 from . import style
-from .config import ADMIN_CHAT_ID, ADMIN_IDS
-from .db import db, today_iso
+from .config import ADMIN_IDS
+from .db import db
 
 
 def admin_ids() -> tuple[int, ...]:

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import html
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..db import db
 from ..keyboards import main_menu, top_menu

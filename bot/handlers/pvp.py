@@ -10,8 +10,7 @@ from aiogram.types import Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..db import db
-from ..keyboards import main_menu
-from ..pvp import accept_challenge, create_challenge, format_match, player_name
+from ..pvp import accept_challenge, create_challenge, player_name
 from ..services import start_quest
 from ..utils import auto_clean, open_screen, safe_edit
 from .. import style

@@ -11,18 +11,14 @@ from typing import Optional
 from aiogram.types import InlineKeyboardMarkup
 
 from .config import (
-    BONUS_QUEST_PER_DAY,
-    QUEST_PER_DAY,
     RISK_PENALTY,
 )
 from .content import total_items
 from .db import db, today_iso
 from .daily import STATE_ACTIVE, STATE_COOLDOWN, STATE_DUE, availability
-from .games import Quest, Render, get_game
+from .games import GAME_TYPES, Quest, Render, get_game
 from .scoring import calculate_points, level_for_points
 from . import achievements, adaptive, style
-
-GAME_TYPES = ("quiz", "fast", "timeline", "riddle", "word", "truth", "math")
 
 SCOPE_TITLES = {
     "today": "очки за сегодня",

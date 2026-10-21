@@ -68,8 +68,28 @@ def test_content() -> None:
     valid_riddles = all(i["answers"] and i["hint"] for i in content.RIDDLES)
     check(valid_riddles, "у всех загадок есть ответы и подсказка")
 
-    valid_sets = all(len(s) == 4 for s in content.TIMELINE_SETS)
-    check(valid_sets, "все наборы хронологии содержат 4 события")
+    valid_sets = all(4 <= len(s) <= 5 for s in content.TIMELINE_SETS)
+    check(valid_sets, "все наборы хронологии содержат 4-5 событий")
+
+    valid_truth = all(
+        i.get("t")
+        and isinstance(i.get("a"), bool)
+        and i.get("why")
+        and i.get("diff") in ("easy", "medium", "hard")
+        for i in content.TRUE_FALSE
+    )
+    check(valid_truth, "все утверждения корректны (текст, да/нет, объяснение)")
+
+    # в каждом пуле должны быть все три сложности
+    for label, items in (
+        ("викторина", content.QUIZ),
+        ("правда/ложь", content.TRUE_FALSE),
+    ):
+        levels = {i.get("diff") for i in items}
+        check(
+            {"easy", "medium", "hard"} <= levels,
+            f"в пуле «{label}» есть все сложности: {sorted(levels)}",
+        )
 
     sorted_sets = all(
         all(a["year_num"] < b["year_num"] for a, b in zip(s, s[1:]))
@@ -230,8 +250,10 @@ async def test_games() -> None:
             break
     check(outcome == "failed", "угадай слово: конец жизней проваливает квест")
 
-    check(set(GAMES) == {"quiz", "fast", "timeline", "riddle", "word"},
-          f"зарегистрировано 5 игр: {sorted(GAMES)}")
+    check(
+        set(GAMES) == {"quiz", "fast", "timeline", "riddle", "word", "truth", "math"},
+        f"зарегистрировано 7 игр: {sorted(GAMES)}",
+    )
 
 
 async def test_database() -> None:
@@ -1401,6 +1423,61 @@ async def test_admin_panel() -> None:
         await db.close()
 
 
+async def test_new_games() -> None:
+    """Новые игры: «Правда или ложь» и «Счёт»."""
+    section("Новые мини-игры")
+
+    from bot.games import get_game
+    from bot.games.math import _make_options, _make_problem
+
+    rng = random.Random(11)
+
+    # «Правда или ложь»
+    truth = get_game("truth")
+    payload = await truth.build("easy", rng)
+    check("t" in payload and "a" in payload, f"есть утверждение и ответ: {payload}")
+    check(isinstance(payload["a"], bool), "ответ - да/нет")
+    check(bool(payload.get("why")), "есть объяснение")
+
+    quest = Quest(id=1, tg_id=1, day="2026-10-21", game_type="truth",
+                  difficulty="easy", payload=payload)
+    render = truth.render(quest)
+    check(render.markup is not None, "есть кнопки")
+    labels = [b.text for row in render.markup.inline_keyboard for b in row]
+    check(any("Правда" in label for label in labels), f"кнопка «Правда»: {labels}")
+    check(any("Ложь" in label for label in labels), f"кнопка «Ложь»: {labels}")
+
+    # верный ответ засчитывается, неверный - нет
+    right_choice = "t" if payload["a"] else "f"
+    wrong_choice = "f" if payload["a"] else "t"
+    ok = await truth.on_choice(quest, right_choice)
+    check(ok.outcome == "solved", f"верный ответ засчитан: {ok.outcome}")
+    bad = await truth.on_choice(quest, wrong_choice)
+    check(bad.outcome == "failed", f"неверный ответ не засчитан: {bad.outcome}")
+
+    # «Счёт»: примеры всегда с верным ответом
+    math_game = get_game("math")
+    for difficulty in ("easy", "medium", "hard"):
+        for _ in range(20):
+            question, answer, cat = _make_problem(difficulty, random.Random(_))
+            options = _make_options(answer, random.Random(_))
+            check_true = answer in options and len(options) == 4
+            if not check_true:
+                check(False, f"сломан пример: {question} -> {answer} {options}")
+                break
+    else:
+        check(True, "все примеры с верным ответом и четырьмя вариантами")
+
+    payload = await math_game.build("medium", rng)
+    check(payload["q"].endswith("= ?"), f"вопрос-пример: {payload['q']}")
+    check(len(payload["options"]) == 4, "четыре варианта")
+    check(
+        str(payload["options"][payload["correct"]]).isdigit(),
+        "верный вариант - число",
+    )
+    check(payload["_key"].startswith("math:"), f"есть ключ: {payload['_key']}")
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — самопроверка")
@@ -1409,6 +1486,7 @@ async def main() -> None:
     test_scoring()
     test_greeting()
     await test_games()
+    await test_new_games()
     await test_database()
     await test_tracking_session()
     await test_daily_logic()

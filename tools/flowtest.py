@@ -148,6 +148,15 @@ async def play_quest(
         await games.on_game_text(FakeMessage(payload["answers"][0], user), state)
     elif game_type == "word":
         await games.on_game_text(FakeMessage(payload["word"].lower(), user), state)
+    elif game_type == "truth":
+        choice = "t" if payload["a"] else "f"
+        await games.on_game_callback(
+            FakeCallback(f"g:{quest_id}:{choice}", user, message), state
+        )
+    elif game_type == "math":
+        await games.on_game_callback(
+            FakeCallback(f"g:{quest_id}:{payload['correct']}", user, message), state
+        )
 
 
 async def run_flow(db: Database, game_type: str) -> None:

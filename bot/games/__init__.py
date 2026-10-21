@@ -4,14 +4,24 @@ from __future__ import annotations
 
 from .base import BaseGame, Quest, Render
 from .fast import FastGame
+from .math import MathGame
 from .quiz import QuizGame
 from .riddle import RiddleGame
 from .timeline import TimelineGame
+from .truth import TruthGame
 from .word import WordGame
 
 GAMES: dict[str, type[BaseGame]] = {
     game.type: game
-    for game in (QuizGame, FastGame, TimelineGame, RiddleGame, WordGame)
+    for game in (
+        QuizGame,
+        FastGame,
+        TimelineGame,
+        RiddleGame,
+        WordGame,
+        TruthGame,
+        MathGame,
+    )
 }
 
 # Игры, где игрок отвечает текстом

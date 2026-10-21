@@ -13,7 +13,7 @@ from . import adaptive
 from .db import db
 from .games import get_game
 
-GAME_TYPES = ("quiz", "fast", "timeline", "riddle", "word")
+GAME_TYPES = ("quiz", "fast", "timeline", "riddle", "word", "truth", "math")
 
 # Без похожих символов (0/O, 1/I), чтобы код можно было продиктовать
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -24,6 +24,8 @@ GAME_TITLES = {
     "timeline": "🕰 Хронология",
     "riddle": "🧩 Загадка",
     "word": "🔤 Угадай слово",
+    "truth": "⚖️ Правда или ложь",
+    "math": "🧮 Счёт",
 }
 
 

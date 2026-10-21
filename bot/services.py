@@ -22,7 +22,7 @@ from .games import Quest, Render, get_game
 from .scoring import calculate_points, level_for_points
 from . import achievements, adaptive, style
 
-GAME_TYPES = ("quiz", "fast", "timeline", "riddle", "word")
+GAME_TYPES = ("quiz", "fast", "timeline", "riddle", "word", "truth", "math")
 
 SCOPE_TITLES = {
     "today": "очки за сегодня",

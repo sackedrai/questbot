@@ -306,6 +306,33 @@ async def main() -> None:
         check("ДОСТИЖЕНИЯ" in edited[-1].text,
               f"на экране есть достижения: {edited[-1].text[:60]}")
 
+    # --- 8.0.1. раздел «Свой вопрос» открывается из меню ---
+    session.calls.clear()
+    msg_ask = Message(message_id=46, date=datetime.now(timezone.utc),
+                      chat=chat, from_user=user)
+    cq_ask = CallbackQuery(id="cq_ask", from_user=user, chat_instance="ci",
+                           data="menu:ask", message=msg_ask)
+    await dp.feed_update(bot, Update(update_id=46, callback_query=cq_ask))
+    edited = [c for c in session.calls if isinstance(c, EditMessageText)]
+    check(
+        bool(edited) and "СВОЙ ВОПРОС" in edited[-1].text,
+        f"раздел вопросов открылся: {edited[-1].text[:60] if edited else None}",
+    )
+    check(
+        bool(edited) and edited[-1].reply_markup is not None,
+        "у раздела вопросов есть кнопки",
+    )
+
+    session.calls.clear()
+    msg_ask_cmd = Message(message_id=47, date=datetime.now(timezone.utc),
+                          chat=chat, from_user=user, text="/ask")
+    await dp.feed_update(bot, Update(update_id=47, message=msg_ask_cmd))
+    sent_ask = [c for c in session.calls if isinstance(c, SendMessage)]
+    check(
+        bool(sent_ask) and "СВОЙ ВОПРОС" in sent_ask[-1].text,
+        f"/ask отвечает: {sent_ask[-1].text[:60] if sent_ask else None}",
+    )
+
     # --- 8.1. в меню возвращаемся без второго меню ---    # в чате мог остаться другой экран (например, вызов на бой)
     await db.track_message(555, 40, "auto")
     session.calls.clear()
@@ -357,6 +384,56 @@ async def main() -> None:
     check(
         bool(sent_players) and sent_players[-1].reply_markup is not None,
         "у списка игроков есть кнопки",
+    )
+
+    # --- 8.3. модерация вопросов: очередь, карточка, одобрение ---
+    question_id = await db.add_user_question(
+        556,
+        "Столица Австралии?",
+        "Канберра",
+        ["Сидней", "Мельбурн", "Перт"],
+        "География",
+        "medium",
+    )
+    session.calls.clear()
+    msg_q = Message(message_id=53, date=datetime.now(timezone.utc),
+                    chat=chat, from_user=user)
+    cq_q = CallbackQuery(id="cq_q", from_user=user, chat_instance="ci",
+                         data="adm:questions", message=msg_q)
+    await dp.feed_update(bot, Update(update_id=53, callback_query=cq_q))
+    edited = [c for c in session.calls if isinstance(c, EditMessageText)]
+    check(
+        bool(edited) and "ВОПРОСЫ ИГРОКОВ" in edited[-1].text,
+        f"очередь вопросов открылась: {edited[-1].text[:60] if edited else None}",
+    )
+    check(
+        bool(edited) and edited[-1].reply_markup is not None,
+        "у очереди вопросов есть кнопки",
+    )
+
+    session.calls.clear()
+    msg_qc = Message(message_id=54, date=datetime.now(timezone.utc),
+                     chat=chat, from_user=user)
+    cq_qc = CallbackQuery(id="cq_qc", from_user=user, chat_instance="ci",
+                          data=f"qmod:view:{question_id}", message=msg_qc)
+    await dp.feed_update(bot, Update(update_id=54, callback_query=cq_qc))
+    edited = [c for c in session.calls if isinstance(c, EditMessageText)]
+    check(
+        bool(edited) and "Столица Австралии" in edited[-1].text,
+        f"карточка вопроса открылась: {edited[-1].text[:60] if edited else None}",
+    )
+
+    session.calls.clear()
+    msg_qa = Message(message_id=55, date=datetime.now(timezone.utc),
+                     chat=chat, from_user=user)
+    cq_qa = CallbackQuery(id="cq_qa", from_user=user, chat_instance="ci",
+                          data=f"qmod:approve:{question_id}", message=msg_qa)
+    await dp.feed_update(bot, Update(update_id=55, callback_query=cq_qa))
+    row = await db.get_user_question(question_id)
+    check(row["status"] == "approved", f"вопрос одобрен: {row['status']}")
+    check(
+        any(isinstance(c, SendMessage) for c in session.calls),
+        f"автору отправлено уведомление: {session.method_names()}",
     )
 
     admin_module.ADMIN_IDS = old_admin

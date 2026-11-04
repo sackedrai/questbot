@@ -9,6 +9,7 @@ from .quiz import QuizGame
 from .riddle import RiddleGame
 from .timeline import TimelineGame
 from .truth import TruthGame
+from .userquiz import UserQuizGame
 from .word import WordGame
 
 GAMES: dict[str, type[BaseGame]] = {
@@ -21,6 +22,7 @@ GAMES: dict[str, type[BaseGame]] = {
         WordGame,
         TruthGame,
         MathGame,
+        UserQuizGame,
     )
 }
 

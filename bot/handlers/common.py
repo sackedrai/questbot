@@ -52,6 +52,7 @@ HELP_TEXT = "\n".join(
         "🏆 Рейтинг       очки, квесты и PvP - отдельно\n"
         "🔁 Ротатор       не выдаёт то, что ты уже проходил\n"
         "🔥 Серия         защита от одного пропущенного дня\n"
+        "📝 Свой вопрос   предложи задание в общий банк\n"
         "🔔 Уведомления   можно отключить в настройках</pre>",
         style.section("КОМАНДЫ"),
         "<pre>/quest        квест дня\n"
@@ -63,6 +64,8 @@ HELP_TEXT = "\n".join(
         "/difficulty   текущий уровень сложности\n"
         "/tz           часовой пояс\n"
         "/invite       ссылка для друзей\n"
+        "/ask          предложить свой вопрос\n"
+        "/myquestions  мои вопросы\n"
         "/clear        очистить чат полностью\n"
         "/help         эта справка</pre>",
         "",
@@ -341,6 +344,9 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     await keep_only(bot, callback.message.chat.id, db, callback.message.message_id)
 
     if action == "home":
+        # Выход в меню должен ещё и сбрасывать незаконченный ввод:
+        # иначе следующее сообщение попадёт в старый сценарий.
+        await state.clear()
         await safe_edit(
             callback.message,
             "\n".join(
@@ -350,6 +356,14 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
                 ]
             ),
             main_menu(),
+        )
+    elif action == "ask":
+        from .ask import ask_home_markup, build_ask_home_text
+
+        await safe_edit(
+            callback.message,
+            await build_ask_home_text(tg_id),
+            ask_home_markup(),
         )
     elif action == "help":
         await safe_edit(callback.message, HELP_TEXT, main_menu())

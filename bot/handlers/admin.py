@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import html
+import json
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
@@ -67,6 +69,16 @@ async def cmd_players(message: Message) -> None:
     )
 
 
+@router.message(Command("moderate"))
+async def cmd_moderate(message: Message) -> None:
+    """Очередь вопросов игроков на модерацию."""
+    if not admin_mod.is_admin(message.from_user.id):
+        await message.answer(_denied())
+        return
+    text, markup = await _questions_screen()
+    await message.answer(text, reply_markup=markup)
+
+
 @router.callback_query(F.data.startswith("adm:"))
 async def on_admin(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     """Обработка кнопок админки."""
@@ -81,6 +93,9 @@ async def on_admin(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None
         await _edit(callback, await admin_mod.build_stats_text(), admin_menu())
     elif action == "players":
         await _edit(callback, await admin_mod.build_players_text(), admin_menu())
+    elif action == "questions":
+        text, markup = await _questions_screen()
+        await _edit(callback, text, markup)
     elif action == "fix":
         await _edit(callback, await _players_picker(), await _players_markup())
     elif action.startswith("user:"):
@@ -144,7 +159,93 @@ async def on_admin(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None
         await _edit(callback, "Меню админки закрыто.", main_menu())
 
 
-@router.message(AdminPanel.broadcast, F.text)
+@router.callback_query(F.data.startswith("qmod:"))
+async def on_question_moderation(callback: CallbackQuery, bot: Bot) -> None:
+    """Карточка вопроса и решения по нему."""
+    if not admin_mod.is_admin(callback.from_user.id):
+        await callback.answer("Неизвестная команда.", show_alert=True)
+        return
+
+    action = callback.data.split(":", 1)[1]
+    if action == "back":
+        text, markup = await _questions_screen()
+        await _edit(callback, text, markup)
+        await callback.answer()
+        return
+
+    try:
+        kind, raw_id = action.split(":", 1)
+        question_id = int(raw_id)
+    except (ValueError, TypeError):
+        await callback.answer("Некорректный вопрос.", show_alert=True)
+        return
+
+    if kind == "view":
+        text, markup = await _question_card(question_id)
+        await _edit(callback, text, markup)
+        await callback.answer()
+        return
+
+    if kind not in ("approve", "reject"):
+        await callback.answer("Неизвестное действие.", show_alert=True)
+        return
+
+    row = await db.get_user_question(question_id)
+    if row is None or row["status"] != "pending":
+        await callback.answer(
+            "Вопрос уже обработан или не найден.", show_alert=True
+        )
+        return
+
+    approved = kind == "approve"
+    ok = (
+        await db.approve_question(question_id, callback.from_user.id)
+        if approved
+        else await db.reject_question(question_id, callback.from_user.id)
+    )
+    if not ok:
+        await callback.answer(
+            "Не удалось: возможно, вопрос уже обработан.", show_alert=True
+        )
+        return
+
+    await _notify_question_author(bot, row, approved)
+    text, markup = await _questions_screen()
+    await _edit(callback, text, markup)
+    await callback.answer("Вопрос опубликован" if approved else "Вопрос отклонён")
+
+
+async def _notify_question_author(bot: Bot, row, approved: bool) -> None:
+    """Сообщить автору решение по его вопросу."""
+    try:
+        if approved:
+            text = "\n".join(
+                [
+                    style.header("✅", "ВОПРОС ОПУБЛИКОВАН", "спасибо!"),
+                    style.note(
+                        "Твой вопрос добавлен в банк и может выпасть "
+                        "в ежедневном квесте."
+                    ),
+                ]
+            )
+        else:
+            text = "\n".join(
+                [
+                    style.header("📝", "ВОПРОС НЕ ПОДОШЁЛ"),
+                    style.note(
+                        "Спасибо, что предложил вопрос. Админ решил, что "
+                        "он пока не подходит для игры."
+                    ),
+                ]
+            )
+        await bot.send_message(
+            int(row["tg_id"]), text, reply_markup=main_menu()
+        )
+    except Exception:  # noqa: BLE001 - игрок мог заблокировать бота
+        pass
+
+
+@router.message(AdminPanel.broadcast, F.text, ~Command("cancel"))
 async def on_broadcast(message: Message, state: FSMContext, bot: Bot) -> None:
     """Рассылает набранный текст всем игрокам."""
     if not admin_mod.is_admin(message.from_user.id):
@@ -169,10 +270,13 @@ async def on_broadcast(message: Message, state: FSMContext, bot: Bot) -> None:
     )
 
 
-@router.message(F.text == "/cancel")
-async def on_cancel(message: Message) -> None:
+@router.message(AdminPanel.broadcast, Command("cancel"))
+async def on_cancel(message: Message, state: FSMContext) -> None:
+    """Отмена объявления. Не перехватывает /cancel других сценариев."""
     if not admin_mod.is_admin(message.from_user.id):
+        await state.clear()
         return
+    await state.clear()
     await message.answer("Отменено.", reply_markup=main_menu())
 
 
@@ -276,3 +380,136 @@ def _achievements_markup(tg_id: int) -> InlineKeyboardMarkup:
     builder.button(text="🔙 В меню", callback_data="adm:menu")
     builder.adjust(1)
     return builder.as_markup()
+
+
+# ----------------------------------------------------------------------
+# модерация вопросов игроков
+# ----------------------------------------------------------------------
+def _button_label(text: object, limit: int = 24) -> str:
+    """Обрезать подпись кнопки по символам и байтам Telegram."""
+    clean = " ".join(str(text).split()) or "без текста"
+    result = ""
+    for char in clean:
+        candidate = result + char
+        if len(candidate) > limit or len(candidate.encode("utf-8")) > 56:
+            break
+        result = candidate
+    if result != clean:
+        result = result.rstrip() + "…"
+    return result
+
+
+def _questions_markup(rows) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for row in rows[:10]:
+        builder.button(
+            text=f"#{row['id']} · {_button_label(row['question'])}",
+            callback_data=f"qmod:view:{row['id']}",
+        )
+    builder.button(text="🔙 В админку", callback_data="adm:back")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+async def _questions_screen() -> tuple[str, InlineKeyboardMarkup]:
+    """Текст и кнопки очереди модерации."""
+    rows = await db.get_pending_questions(limit=50)
+    if not rows:
+        text = "\n".join(
+            [
+                style.header("📝", "ВОПРОСЫ ИГРОКОВ", "очередь пуста"),
+                style.note("Новых вопросов на проверке нет."),
+            ]
+        )
+    else:
+        lines = [
+            style.header(
+                "📝",
+                "ВОПРОСЫ ИГРОКОВ",
+                f"{len(rows)} на проверке",
+            ),
+            style.note("Выбери вопрос, чтобы увидеть варианты и решить."),
+        ]
+        if len(rows) > 10:
+            lines.append(
+                style.note(f"Показаны первые 10 из {len(rows)}.")
+            )
+        text = "\n".join(lines)
+    return text, _questions_markup(rows)
+
+
+async def _question_card(question_id: int) -> tuple[str, InlineKeyboardMarkup]:
+    """Полная карточка вопроса для решения админа."""
+    row = await db.get_user_question(question_id)
+    if row is None:
+        text = "\n".join(
+            [
+                style.header("📝", "ВОПРОС", f"#{question_id}"),
+                style.note("Вопрос не найден."),
+            ]
+        )
+        return text, _questions_markup([])
+
+    if row["status"] != "pending":
+        status = {
+            "approved": "опубликован",
+            "rejected": "отклонён",
+        }.get(row["status"], row["status"])
+        text = "\n".join(
+            [
+                style.header("📝", "ВОПРОС", f"#{question_id}"),
+                style.note(f"Статус: {status}. Решение уже принято."),
+            ]
+        )
+        return text, _questions_markup([])
+
+    author = await db.get_user(int(row["tg_id"]))
+    author_name = (
+        (author["nickname"] if author else "") or str(row["tg_id"])
+    )
+    try:
+        wrong = json.loads(row["options"] or "[]")
+    except (TypeError, ValueError):
+        wrong = []
+    if not isinstance(wrong, list):
+        wrong = []
+
+    question = html.escape(str(row["question"]))
+    answer = html.escape(str(row["answer"]))
+    category = html.escape(str(row["category"] or "Свои вопросы"))
+    levels = {"easy": "лёгкая", "medium": "средняя", "hard": "сложная"}
+    level = levels.get(row["difficulty"], row["difficulty"])
+
+    lines = [
+        style.header("📝", "ВОПРОС НА МОДЕРАЦИИ", f"#{question_id} · от {author_name}"),
+        style.question(question),
+        style.section("ВАРИАНТЫ"),
+        f"✅ {answer}",
+    ]
+    for item in wrong:
+        lines.append(f"⚪ {html.escape(str(item))}")
+    lines.extend(
+        [
+            style.stats(
+                [
+                    ("", "Категория", category),
+                    ("", "Сложность", level),
+                ]
+            ),
+            style.note(
+                "После публикации вопрос сможет выпасть любому игроку. "
+                "Проверь, что верный ответ действительно один."
+            ),
+        ]
+    )
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="✅ Опубликовать", callback_data=f"qmod:approve:{question_id}"
+    )
+    builder.button(
+        text="❌ Отклонить", callback_data=f"qmod:reject:{question_id}"
+    )
+    builder.button(text="🔙 К очереди", callback_data="qmod:back")
+    builder.adjust(2, 1)
+    return "\n".join(lines), builder.as_markup()

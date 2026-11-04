@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from aiogram import Router
 
-from . import admin, common, games, profile, pvp, quests, ranking, selfcheck, settings
+from . import admin, ask, common, games, profile, pvp, quests, ranking, selfcheck, settings
 
 router = Router()
 router.include_router(games.router)
@@ -19,6 +19,7 @@ router.include_router(common.router)
 router.include_router(quests.router)
 router.include_router(profile.router)
 router.include_router(ranking.router)
+router.include_router(ask.router)
 # админка последняя: её команды не должны перехватывать обычные сообщения
 router.include_router(admin.router)
 

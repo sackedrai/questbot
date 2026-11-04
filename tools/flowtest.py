@@ -25,9 +25,9 @@ from aiogram.fsm.context import FSMContext  # noqa: E402
 from aiogram.fsm.storage.memory import MemoryStorage  # noqa: E402
 
 from bot.db import Database  # noqa: E402
-from bot.games import GAMES  # noqa: E402
+from bot.games import GAME_TYPES  # noqa: E402
 from bot.handlers import common, games, profile, quests, ranking  # noqa: E402
-from bot.states import Onboarding  # noqa: E402
+from bot.states import AskQuestion, Onboarding  # noqa: E402
 from tools._testing import (  # noqa: E402
     FakeBot,
     FakeCallback,
@@ -63,7 +63,7 @@ async def play_quest(
     payload = json.loads(quest_row["payload"])
     message = quest_msg
 
-    if game_type in ("quiz", "fast"):
+    if game_type in ("quiz", "fast", "userquiz"):
         await games.on_game_callback(
             FakeCallback(f"g:{quest_id}:{payload['correct']}", user, message),
             state,
@@ -202,7 +202,7 @@ async def test_pvp_from_menu(db: Database) -> None:
 async def run_flow(db: Database, game_type: str) -> None:
     print(f"\n--- Сценарий: {game_type} ---")
     storage = MemoryStorage()
-    user = FakeUser(1000 + list(GAMES).index(game_type))
+    user = FakeUser(1000 + list(GAME_TYPES).index(game_type))
     state = FSMContext(storage=storage, key=user.id)
     fake_bot = FakeBot()
     message = FakeMessage("/start", user)
@@ -210,6 +210,7 @@ async def run_flow(db: Database, game_type: str) -> None:
     # Форсируем тип мини-игры, чтобы проверить каждую
     import bot.services as services_module
     services_module.GAME_TYPES = (game_type,)
+    services_module.USER_QUESTION_CHANCE = 0.0
 
     # 1. Регистрация
     await common.cmd_start(message, state, fake_bot)
@@ -274,6 +275,7 @@ async def test_failure(db: Database) -> None:
     print("\n--- Сценарий: неверный ответ ---")
     import bot.services as services_module
     services_module.GAME_TYPES = ("quiz",)
+    services_module.USER_QUESTION_CHANCE = 0.0
 
     storage = MemoryStorage()
     user = FakeUser(2001)
@@ -307,6 +309,174 @@ async def test_failure(db: Database) -> None:
           "после провала квест можно переиграть")
 
 
+async def test_user_question(db: Database) -> None:
+    """Полный цикл: игрок предложил вопрос, админ одобрил, вопрос выпал."""
+    print("\n--- Сценарий: свой вопрос ---")
+    import bot.admin as admin_module
+    import bot.services as services_module
+    from bot.handlers import admin as admin_handlers
+    from bot.handlers import ask as ask_handlers
+
+    storage = MemoryStorage()
+    author = FakeUser(4001)
+    player = FakeUser(4002)
+    admin_user = FakeUser(9001)
+    state = FSMContext(storage=storage, key=author.id)
+    player_state = FSMContext(storage=storage, key=player.id)
+    fake_bot = FakeBot()
+
+    await db.create_user(author.id)
+    await db.set_nickname(author.id, "Автор")
+    await db.create_user(player.id)
+    await db.set_nickname(player.id, "Игрок")
+
+    old_admins = admin_module.ADMIN_IDS
+    old_chance = services_module.USER_QUESTION_CHANCE
+    old_types = services_module.GAME_TYPES
+    admin_module.ADMIN_IDS = (admin_user.id,)
+    services_module.USER_QUESTION_CHANCE = 0.0
+    services_module.GAME_TYPES = ("quiz",)
+
+    try:
+        home = FakeMessage("/ask", author)
+        await ask_handlers.cmd_ask(home, fake_bot)
+        check("свой вопрос" in home.last_text.lower(), "открыт раздел вопросов")
+
+        screen = FakeMessage("/ask", author)
+        await ask_handlers.on_ask_new(
+            FakeCallback("ask:new", author, screen), state
+        )
+        check(
+            await state.get_state() == AskQuestion.waiting_question.state,
+            "начат ввод вопроса",
+        )
+
+        await ask_handlers.on_question_text(
+            FakeMessage("Столица Австралии?", author), state, fake_bot
+        )
+        await ask_handlers.on_answer_text(
+            FakeMessage("Канберра", author), state, fake_bot
+        )
+        await ask_handlers.on_options_text(
+            FakeMessage("Сидней, Мельбурн, Перт", author), state, fake_bot
+        )
+        await ask_handlers.on_category_text(
+            FakeMessage("География", author), state, fake_bot
+        )
+        screen = FakeMessage("", author)
+        await ask_handlers.on_difficulty_callback(
+            FakeCallback("ask:diff:medium", author, screen), state, fake_bot
+        )
+
+        rows = await db.get_user_questions(author.id)
+        check(len(rows) == 1, f"вопрос сохранён: {len(rows)}")
+        question_id = rows[0]["id"] if rows else 0
+        check(rows and rows[0]["status"] == "pending", "вопрос ждёт проверки")
+        check(
+            rows and json.loads(rows[0]["options"]) == ["Сидней", "Мельбурн", "Перт"],
+            "варианты ответа сохранены",
+        )
+
+        admin_msg = FakeMessage("/moderate", admin_user)
+        await admin_handlers.cmd_moderate(admin_msg)
+        check(str(question_id) in admin_msg.last_text, "вопрос виден в очереди")
+
+        card = FakeMessage("/admin", admin_user)
+        await admin_handlers.on_question_moderation(
+            FakeCallback(f"qmod:view:{question_id}", admin_user, card), fake_bot
+        )
+        check(
+            "Столица Австралии" in card.edited[-1][0],
+            "карточка показывает вопрос",
+        )
+        check(
+            "Канберра" in card.edited[-1][0],
+            "карточка показывает верный ответ",
+        )
+
+        await admin_handlers.on_question_moderation(
+            FakeCallback(f"qmod:approve:{question_id}", admin_user, card), fake_bot
+        )
+        row = await db.get_user_question(question_id)
+        check(row["status"] == "approved", "вопрос одобрен")
+        check(
+            any(chat_id == author.id for chat_id, _ in fake_bot.sent),
+            "автору сообщили об одобрении",
+        )
+
+        # Вопрос автора не должен выпасть ему же.
+        services_module.USER_QUESTION_CHANCE = 1.0
+        await services_module.start_quest(author.id)
+        own_quest = await db.get_active_quest(author.id)
+        check(
+            own_quest is not None and own_quest["game_type"] != "userquiz",
+            "автор не получает свой вопрос",
+        )
+
+        # Другому игроку вопрос выпадает как отдельная игра.
+        services_module.USER_QUESTION_CHANCE = 1.0
+        result = await services_module.start_quest(player.id)
+        check(not result.blocked, "вопрос выдан игроку")
+        quest_row = await db.get_active_quest(player.id)
+        check(
+            quest_row is not None and quest_row["game_type"] == "userquiz",
+            "тип игры - вопрос игрока",
+        )
+        payload = json.loads(quest_row["payload"])
+        check(payload["q"] == "Столица Австралии?", "текст вопроса совпадает")
+        check(
+            payload["options"][payload["correct"]] == "Канберра",
+            "верный вариант на месте",
+        )
+
+        await games.on_game_callback(
+            FakeCallback(
+                f"g:{quest_row['id']}:{payload['correct']}",
+                player,
+                FakeMessage("/quest", player),
+            ),
+            player_state,
+            fake_bot,
+        )
+        player_row = await db.get_user(player.id)
+        check(player_row["quests_done"] == 1, "вопрос засчитан как квест")
+        check(player_row["points"] > 0, "за ответ начислены очки")
+
+        # Отклонение тоже уведомляет автора.
+        rejected_id = await db.add_user_question(
+            player.id,
+            "Вопрос, который не подойдёт",
+            "Да",
+            ["Нет", "Может", "Не знаю"],
+            "Тест",
+            "easy",
+        )
+        await admin_handlers.on_question_moderation(
+            FakeCallback(f"qmod:reject:{rejected_id}", admin_user, card), fake_bot
+        )
+        rejected = await db.get_user_question(rejected_id)
+        check(rejected["status"] == "rejected", "вопрос отклонён")
+        check(
+            any(chat_id == player.id for chat_id, _ in fake_bot.sent),
+            "автору сообщили об отказе",
+        )
+
+        for index in range(3):
+            await db.add_user_question(
+                author.id,
+                f"Лимит {index}",
+                "Да",
+                ["Нет", "Может", "Не знаю"],
+                "Тест",
+                "easy",
+            )
+        check(not await ask_handlers._can_ask(author.id), "лимит 3 вопроса работает")
+    finally:
+        admin_module.ADMIN_IDS = old_admins
+        services_module.USER_QUESTION_CHANCE = old_chance
+        services_module.GAME_TYPES = old_types
+
+
 async def main() -> None:
     print("=" * 56)
     print("  QuestBot — интеграционный тест")
@@ -319,11 +489,12 @@ async def main() -> None:
     patch_db(db)
 
     try:
-        for game_type in GAMES:
+        for game_type in GAME_TYPES:
             await run_flow(db, game_type)
         await test_failure(db)
         await test_pvp(db)
         await test_pvp_from_menu(db)
+        await test_user_question(db)
     finally:
         await db.close()
 

@@ -17,8 +17,13 @@ from .content import total_items
 from .db import db, today_iso
 from .daily import STATE_ACTIVE, STATE_COOLDOWN, STATE_DUE, availability
 from .games import GAME_TYPES, Quest, Render, get_game
+from .games.userquiz import UserQuizGame
 from .scoring import calculate_points, level_for_points
 from . import achievements, adaptive, style
+
+# Вероятность выдать пользовательский вопрос вместо обычного (0.0..1.0).
+# Вопросы игроков - дополнение к банку, а не замена семи основным играм.
+USER_QUESTION_CHANCE = 0.25
 
 SCOPE_TITLES = {
     "today": "очки за сегодня",
@@ -99,13 +104,31 @@ async def start_quest(
     rng = random.Random(f"{tg_id}:{day}:{time.time_ns()}")
     if difficulty is None:
         difficulty = await adaptive.pick_difficulty(tg_id, rng)
+
+    # Ротатор: не выдаём то, что игрок уже проходил.
+    used = await db.used_item_keys(tg_id) if payload is None else None
+
     if game_type is None:
-        game_type = rng.choice(GAME_TYPES)
+        # Иногда подмешиваем вопрос, который прислал другой игрок.
+        if (
+            payload is None
+            and USER_QUESTION_CHANCE > 0
+            and rng.random() < USER_QUESTION_CHANCE
+        ):
+            candidate = await UserQuizGame.build(
+                difficulty,
+                rng,
+                exclude=used,
+                exclude_author=tg_id,
+            )
+            if candidate is not None:
+                payload = candidate
+                game_type = UserQuizGame.type
+        if game_type is None:
+            game_type = rng.choice(GAME_TYPES)
     game = get_game(game_type)
 
     if payload is None:
-        # ротатор: не выдаём то, что игрок уже проходил
-        used = await db.used_item_keys(tg_id)
         payload = await game.build(difficulty, rng, exclude=used)
 
     payload = dict(payload)
@@ -297,6 +320,7 @@ async def build_profile_text(tg_id: int) -> str:
     best_day = await db.best_day_points(tg_id)
     adaptive_level = await adaptive.current_level(tg_id)
     unique_items = await db.count_used_items(tg_id)
+    user_questions = await db.count_approved_questions()
     free_ready = await db.streak_free_available(tg_id)
     earned_count, total_count = await achievements.achievements_summary(tg_id)
     earned_titles = await achievements.achievements_list(tg_id)
@@ -331,7 +355,11 @@ async def build_profile_text(tg_id: int) -> str:
                 ("", "Квестов", str(done)),
                 ("", "Успешно", f"{correct}  ({accuracy}%)"),
                 ("", "Провалено", str(user["wrong"])),
-                ("", "Уникальных", f"{unique_items} из {total_items()}"),
+                (
+                    "",
+                    "Уникальных",
+                    f"{unique_items} из {total_items() + user_questions}",
+                ),
             ]
         ),
         style.section("⏳ СЛЕДУЮЩИЙ КВЕСТ"),

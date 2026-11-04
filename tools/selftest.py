@@ -242,8 +242,18 @@ async def test_games() -> None:
     check(outcome == "failed", "угадай слово: конец жизней проваливает квест")
 
     check(
-        set(GAMES) == {"quiz", "fast", "timeline", "riddle", "word", "truth", "math"},
-        f"зарегистрировано 7 игр: {sorted(GAMES)}",
+        set(GAMES)
+        == {
+            "quiz",
+            "fast",
+            "timeline",
+            "riddle",
+            "word",
+            "truth",
+            "math",
+            "userquiz",
+        },
+        f"зарегистрировано 7 игр и вопросы игроков: {sorted(GAMES)}",
     )
 
 
@@ -740,6 +750,102 @@ async def test_rotator() -> None:
         check(fixed == 1, f"ключ восстановлен: {fixed}")
         restored = (await db.get_quest(old_id))["item_key"]
         check(restored == "quiz:Старый вопрос?", f"ключ восстановлен верно: {restored}")
+    finally:
+        await db.close()
+
+
+async def test_user_questions() -> None:
+    """Вопросы игроков: модерация, ротатор и выдача в игру."""
+    section("Вопросы игроков")
+
+    import random
+
+    from bot.games.userquiz import UserQuizGame
+
+    db = Database(":memory:")
+    await db.connect()
+    patch_db(db)
+    try:
+        await db.create_user(1)
+        await db.set_nickname(1, "Автор")
+        await db.create_user(2)
+        await db.set_nickname(2, "Игрок")
+
+        question_id = await db.add_user_question(
+            1,
+            "Столица Австралии?",
+            "Канберра",
+            ["Сидней", "Мельбурн", "Перт"],
+            "География",
+            "medium",
+        )
+        check(question_id > 0, f"вопрос сохранён: id={question_id}")
+        stats = await db.question_stats(1)
+        check(stats == {"total": 1, "pending": 1, "approved": 0, "rejected": 0},
+              f"статистика вопроса: {stats}")
+        check(await db.count_user_questions(1, "pending") == 1,
+              "вопрос в очереди модерации")
+
+        row = await db.get_user_question(question_id)
+        check(row["question"] == "Столица Австралии?", "текст вопроса на месте")
+        check(row["status"] == "pending", "начальный статус - на проверке")
+
+        approved = await db.approve_question(question_id, 9001)
+        check(approved, "вопрос одобрен")
+        check(not await db.approve_question(question_id, 9001),
+              "повторно одобрить нельзя")
+        stats = await db.question_stats(1)
+        check(stats["approved"] == 1 and stats["pending"] == 0,
+              f"статус обновился: {stats}")
+        check(await db.count_approved_questions() == 1,
+              "одобренный вопрос учтён в банке")
+
+        game = UserQuizGame
+        rng = random.Random(1)
+        payload = await game.build(
+            "medium", rng, exclude=set(), exclude_author=2
+        )
+        check(payload is not None, "вопрос собран для другого игрока")
+        check(len(payload["options"]) == 4, "четыре варианта ответа")
+        check(payload["options"][payload["correct"]] == "Канберра",
+              "верный вариант отмечен")
+        check(payload["_key"] == f"userquiz:{question_id}",
+              "ключ ротатора привязан к вопросу")
+
+        quest = Quest(
+            id=1, tg_id=2, day="2026-10-21", game_type="userquiz",
+            difficulty="medium", payload=payload,
+        )
+        render = game.render(quest)
+        rows = render.markup.inline_keyboard if render.markup else []
+        check(len(rows) == 5, f"четыре кнопки и выход: {len(rows)} строк")
+        result = await game.on_choice(quest, str(payload["correct"]))
+        check(result.outcome == "solved", "верный ответ засчитан")
+
+        own = await game.build(
+            "medium", random.Random(2), exclude=set(), exclude_author=1
+        )
+        check(own is None, "автор не получает свой вопрос")
+        used = {payload["_key"]}
+        again = await game.build(
+            "medium", random.Random(3), exclude=used, exclude_author=2
+        )
+        check(again is None, "ротатор не повторяет вопрос")
+
+        # Если точной сложности нет, вопрос всё равно доступен.
+        fallback = await game.build(
+            "hard", random.Random(4), exclude=set(), exclude_author=2
+        )
+        check(fallback is not None, "вопрос выдаётся при другой сложности")
+
+        rejected_id = await db.add_user_question(
+            2, "Плохой вопрос", "Да", ["Нет", "Может", "Не знаю"], "Тест", "easy"
+        )
+        check(await db.reject_question(rejected_id, 9001), "вопрос отклонён")
+        rejected = await db.get_user_question(rejected_id)
+        check(rejected["status"] == "rejected", "статус отклонения сохранён")
+        stats = await db.question_stats(2)
+        check(stats["rejected"] == 1, f"отказ учтён: {stats}")
     finally:
         await db.close()
 
@@ -1509,6 +1615,7 @@ async def main() -> None:
     await test_daily_logic()
     await test_adaptive_and_notify()
     await test_rotator()
+    await test_user_questions()
     await test_novice_level()
     await test_daily_pass_batch()
     await test_profile_and_top()

@@ -16,9 +16,10 @@ def main_menu() -> InlineKeyboardMarkup:
     builder.button(text="🏅 Достижения", callback_data="menu:ach")
     builder.button(text="⚙️ Настройки", callback_data="menu:settings")
     builder.button(text="🔗 Приглашение", callback_data="menu:invite")
+    builder.button(text="📝 Свой вопрос", callback_data="menu:ask")
     builder.button(text="🧹 Очистить чат", callback_data="menu:clear")
     builder.button(text="ℹ️ Как играть", callback_data="menu:help")
-    builder.adjust(1, 2, 3, 2, 2)
+    builder.adjust(1, 2, 3, 3, 2)
     return builder.as_markup()
 
 
@@ -37,12 +38,13 @@ def admin_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="📊 Статистика", callback_data="adm:stats")
     builder.button(text="👥 Игроки", callback_data="adm:players")
+    builder.button(text="📝 Вопросы", callback_data="adm:questions")
     builder.button(text="🛠 Починить игрока", callback_data="adm:fix")
     builder.button(text="📣 Объявление", callback_data="adm:broadcast")
     builder.button(text="📤 Выгрузка CSV", callback_data="adm:export")
     builder.button(text="🧹 Уборка базы", callback_data="adm:vacuum")
     builder.button(text="🔙 В меню", callback_data="menu:home")
-    builder.adjust(2, 2, 2, 1)
+    builder.adjust(2, 2, 2, 2)
     return builder.as_markup()
 
 

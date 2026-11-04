@@ -129,6 +129,45 @@ async def _render(db: Database) -> None:
         render = game.render(quest)
         show(f"КВЕСТ: {game_type.upper()}", render.text, render.markup)
 
+    # вопрос, присланный игроком
+    from bot.games.userquiz import UserQuizGame
+
+    question_id = await db.add_user_question(
+        2,
+        "Столица Австралии?",
+        "Канберра",
+        ["Сидней", "Мельбурн", "Перт"],
+        "География",
+        "medium",
+    )
+    await db.approve_question(question_id, 9001)
+    payload = await UserQuizGame.build("medium", rng, exclude_author=1)
+    if payload is not None:
+        quest = Quest(id=2, tg_id=1, day="2026-10-21",
+                      game_type="userquiz", difficulty="medium",
+                      payload=payload)
+        render = UserQuizGame.render(quest)
+        show("КВЕСТ: ВОПРОС ИГРОКА", render.text, render.markup)
+
+    # свой вопрос: раздел и список
+    from bot.handlers.ask import (
+        _mine_markup,
+        _my_questions_text,
+        ask_home_markup,
+        build_ask_home_text,
+    )
+
+    await db.add_user_question(
+        1,
+        "Какой город является столицей Японии?",
+        "Токио",
+        ["Осака", "Киото", "Нагоя"],
+        "География",
+        "easy",
+    )
+    show("СВОЙ ВОПРОС", await build_ask_home_text(1), ask_home_markup())
+    show("МОИ ВОПРОСЫ", await _my_questions_text(1), _mine_markup())
+
     # результат
     from bot.services import complete_quest
     from bot.games import Render

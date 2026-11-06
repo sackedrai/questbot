@@ -19,8 +19,8 @@ router.include_router(common.router)
 router.include_router(quests.router)
 router.include_router(profile.router)
 router.include_router(ranking.router)
-router.include_router(ask.router)
 # админка последняя: её команды не должны перехватывать обычные сообщения
 router.include_router(admin.router)
+router.include_router(ask.router)
 
 __all__ = ["router"]

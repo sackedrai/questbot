@@ -11,7 +11,7 @@ import html
 import re
 
 from aiogram import Bot, F, Router
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -251,11 +251,8 @@ async def on_ask_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer("Отменено")
 
 
-@router.message(Command("cancel"))
+@router.message(Command("cancel"), StateFilter(AskQuestion))
 async def cmd_cancel(message: Message, state: FSMContext, bot: Bot) -> None:
-    current = await state.get_state()
-    if not current or not current.startswith(f"{AskQuestion.__name__}:"):
-        return
     await state.clear()
     await open_screen(
         bot,

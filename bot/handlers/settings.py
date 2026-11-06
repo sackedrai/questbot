@@ -22,6 +22,8 @@ async def _settings_markup(tg_id: int) -> tuple[str, InlineKeyboardBuilder]:
     tz = int(user["tz_offset"]) if user and user["tz_offset"] is not None else 3
     notify = bool(user["notify"]) if user else True
     level = await adaptive.current_level(tg_id)
+    locked = bool(user and user["adaptive_locked"])
+    locked_diff = user["locked_difficulty"] if user and user["adaptive_locked"] else None
 
     text = "\n".join(
         [
@@ -33,7 +35,11 @@ async def _settings_markup(tg_id: int) -> tuple[str, InlineKeyboardBuilder]:
                     ("", "Сложность", adaptive.TITLES.get(level, level)),
                 ]
             ),
-            style.note("Сложность подбирается автоматически."),
+            style.note(
+                f"Сложность зафиксирована: {adaptive.TITLES.get(locked_diff, locked_diff)}"
+                if locked
+                else "Сложность подбирается автоматически."
+            ),
         ]
     )
 
@@ -44,6 +50,13 @@ async def _settings_markup(tg_id: int) -> tuple[str, InlineKeyboardBuilder]:
         callback_data="set:notify",
     )
     builder.button(text="🎚 Как работает сложность", callback_data="set:difficulty")
+    if locked:
+        builder.button(
+            text="✅ Вернуть адаптивную сложность",
+            callback_data="set:unlock_difficulty",
+        )
+    else:
+        builder.button(text="🔄 Сбросить сложность", callback_data="set:reset_difficulty")
     builder.button(text="🔙 В меню", callback_data="menu:home")
     builder.adjust(1)
     return text, builder
@@ -89,6 +102,39 @@ async def on_set(callback: CallbackQuery, state: FSMContext) -> None:
             main_menu(),
         )
         await callback.answer()
+        return
+
+    if action == "reset_difficulty":
+        await db.lock_difficulty(tg_id, "easy")
+        text, builder = await _settings_markup(tg_id)
+        await safe_edit(
+            callback.message,
+            "\n".join(
+                [
+                    style.header("🔄", "СЛОЖНОСТЬ СБРОШЕНА"),
+                    style.note("Снова начнём с лёгкого уровня."),
+                    style.note("Адаптивный подбор выключен — вернёшь его кнопкой ниже."),
+                ]
+            ),
+            builder.as_markup(),
+        )
+        await callback.answer("Сложность сброшена на лёгкую")
+        return
+
+    if action == "unlock_difficulty":
+        await db.unlock_difficulty(tg_id)
+        text, builder = await _settings_markup(tg_id)
+        await safe_edit(
+            callback.message,
+            "\n".join(
+                [
+                    style.header("✅", "АДАПТИВНАЯ СЛОЖНОСТЬ ВКЛЮЧЕНА"),
+                    style.note("Бот снова подбирает уровень сам по твоим результатам."),
+                ]
+            ),
+            builder.as_markup(),
+        )
+        await callback.answer("Адаптивная сложность возвращена")
         return
 
     if action == "tz":

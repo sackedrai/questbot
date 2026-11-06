@@ -25,11 +25,12 @@ def main_menu() -> InlineKeyboardMarkup:
 
 def after_quest_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    builder.button(text="🎯 Ещё один квест", callback_data="menu:quest")
     builder.button(text="⚡ Ещё один (риск ×2)", callback_data="menu:risk")
     builder.button(text="🏆 Рейтинг", callback_data="menu:top")
     builder.button(text="👤 Профиль", callback_data="menu:profile")
     builder.button(text="🔙 В меню", callback_data="menu:home")
-    builder.adjust(2, 2)
+    builder.adjust(2, 2, 1)
     return builder.as_markup()
 
 

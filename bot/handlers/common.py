@@ -13,6 +13,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..db import db
 from ..keyboards import main_menu, top_menu
 from ..services import build_profile_text, build_top_text, start_quest
+from ..daily import availability, STATE_ACTIVE, STATE_COOLDOWN
 from ..states import Game, Onboarding
 from .. import style
 from ..utils import keep_only, open_screen, safe_edit, wipe_chat
@@ -64,6 +65,7 @@ HELP_TEXT = "\n".join(
         "/difficulty   текущий уровень сложности\n"
         "/tz           часовой пояс\n"
         "/invite       ссылка для друзей\n"
+        "/next         время до следующего квеста\n"
         "/ask          предложить свой вопрос\n"
         "/myquestions  мои вопросы\n"
         "/clear        очистить чат полностью\n"
@@ -357,6 +359,46 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
             ),
             main_menu(),
         )
+    elif action == "quest":
+        from .quests import cmd_quest
+
+        await cmd_quest(callback.message, state, bot)
+        await callback.answer()
+    elif action == "risk":
+        from .quests import cmd_risk
+
+        await cmd_risk(callback.message, state, bot)
+        await callback.answer()
+    elif action == "next":
+        avail = await availability(tg_id)
+        if avail.state == STATE_COOLDOWN:
+            text = "\n".join(
+                [
+                    style.header("⏳", "СЛЕДУЮЩИЙ КВЕСТ ЧЕРЕЗ", avail.human_left()),
+                    style.note(
+                        f"Будет доступен в {avail.human_due()} по твоему часовому поясу."
+                    ),
+                    style.note(
+                        "Следующий квест доступен через 24 часа после прошлого."
+                    ),
+                ]
+            )
+        elif avail.state == STATE_ACTIVE:
+            text = "\n".join(
+                [
+                    style.header("🎯", "У ТЕБЯ ЕСТЬ АКТИВНЫЙ КВЕСТ"),
+                    style.note("Заверши его, а потом сможешь взять следующий."),
+                ]
+            )
+        else:
+            text = "\n".join(
+                [
+                    style.header("✅", "КВЕСТ ДОСТУПЕН СЕЙЧАС"),
+                    style.note("Нажми «Квест дня», чтобы взять его."),
+                ]
+            )
+        await safe_edit(callback.message, text, main_menu())
+        await callback.answer()
     elif action == "ask":
         from .ask import ask_home_markup, build_ask_home_text
 

@@ -114,6 +114,8 @@ MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("pvp_losses", "INTEGER DEFAULT 0"),
         ("pvp_points", "INTEGER DEFAULT 0"),
         ("streak_free_day", "TEXT DEFAULT ''"),
+        ("adaptive_locked", "INTEGER DEFAULT 0"),
+        ("locked_difficulty", "TEXT DEFAULT 'easy'"),
     ],
     "quests": [
         ("pvp_id", "INTEGER DEFAULT 0"),
@@ -232,6 +234,28 @@ class Database:
             "INSERT INTO users (tg_id, difficulty, created_at) VALUES (?, ?, ?)"
             " ON CONFLICT(tg_id) DO UPDATE SET difficulty = excluded.difficulty",
             (tg_id, difficulty, time.time()),
+        )
+        await self.db.commit()
+
+    async def lock_difficulty(self, tg_id: int, difficulty: str = "easy") -> None:
+        """Зафиксировать сложность игроку (сброс адаптивной подборки)."""
+        await self.db.execute(
+            "INSERT INTO users (tg_id, adaptive_locked, locked_difficulty, created_at) "
+            "VALUES (?, 1, ?, ?)"
+            " ON CONFLICT(tg_id) DO UPDATE SET "
+            "adaptive_locked = 1, locked_difficulty = excluded.locked_difficulty",
+            (tg_id, difficulty, time.time()),
+        )
+        await self.db.commit()
+
+    async def unlock_difficulty(self, tg_id: int) -> None:
+        """Вернуть автоматический подбор сложности."""
+        await self.db.execute(
+            "INSERT INTO users (tg_id, adaptive_locked, locked_difficulty, created_at) "
+            "VALUES (?, 0, 'easy', ?)"
+            " ON CONFLICT(tg_id) DO UPDATE SET "
+            "adaptive_locked = 0, locked_difficulty = 'easy'",
+            (tg_id, time.time()),
         )
         await self.db.commit()
 

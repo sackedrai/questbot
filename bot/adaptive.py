@@ -38,6 +38,10 @@ async def _base_level(tg_id: int, limit: int = 6) -> tuple[str, int]:
     Новичку (мало результатов) сложный уровень не выдаётся: одна удачная
     попытка не должна сразу кидать игрока в сложные вопросы.
     """
+    user = await db.get_user(tg_id)
+    if user and user["adaptive_locked"]:
+        return str(user["locked_difficulty"] or "easy"), 0
+
     results = await db.recent_results(tg_id, limit=limit)
     if not results:
         return "easy", 0

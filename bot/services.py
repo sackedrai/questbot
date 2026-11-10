@@ -223,7 +223,6 @@ async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
 
     if is_pvp:
         await db.finish_pvp(quest.pvp_id, quest.tg_id, points)
-        day_summary = await db.daily_summary(quest.tg_id, quest.day)
         table = style.stats(
             [("", label, value) for label, value in breakdown],
             total=("ИТОГО", style.points_line(points)),
@@ -255,7 +254,7 @@ async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
             f"🔥 Серия: <b>{streak}</b> дн.  ·  "
             f"Сегодня: <b>{style.number(day_points)}</b> очков",
         ]
-        if not is_pvp and await db.streak_free_used_today(quest.tg_id, quest.day):
+        if await db.streak_free_used_today(quest.tg_id, quest.day):
             lines.append(style.note("🛡 Защита серии сработала — пропущенный день не обнулил её."))
         fresh = await achievements.check_achievements(quest.tg_id)
         for title in fresh:

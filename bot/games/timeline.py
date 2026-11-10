@@ -81,6 +81,7 @@ class TimelineGame(BaseGame):
         )
 
         builder = InlineKeyboardBuilder()
+        rows = 0
         for index in payload["order"]:
             if index in collected:
                 continue
@@ -88,8 +89,11 @@ class TimelineGame(BaseGame):
                 text=items[index]["text"],
                 callback_data=f"g:{quest.id}:{index}",
             )
+            rows += 1
         builder.adjust(1)
-        add_skip(builder, quest.id, rows_before=4)
+        # строк ровно столько, сколько кнопок с событиями: иначе
+        # кнопки «Сдаться» и «В меню» съезжают на пустую строку
+        add_skip(builder, quest.id, rows_before=max(rows, 1))
         return Render(text=text, markup=builder.as_markup())
 
     @classmethod

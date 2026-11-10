@@ -12,7 +12,7 @@ from ..keyboards import after_quest_menu, main_menu
 from ..services import complete_quest
 from ..states import Game
 from .. import style
-from ..utils import safe_edit
+from ..utils import auto_clean, safe_edit
 router = Router()
 
 
@@ -135,7 +135,9 @@ async def on_skip(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.message(Game.answer, F.text, ~F.text.startswith("/"))
-async def on_game_text(message: Message, state: FSMContext) -> None:
+async def on_game_text(
+    message: Message, state: FSMContext, bot: Bot
+) -> None:
     data = await state.get_data()
     quest_id = data.get("quest_id")
 
@@ -157,11 +159,15 @@ async def on_game_text(message: Message, state: FSMContext) -> None:
 
     if render.outcome is None:
         markup = render.markup or render.keep_markup
+        # каждая буква в «Угадай слово» порождала новое сообщение -
+        # за игру чат разрастался на десяток экранов. Убираем старые.
+        await auto_clean(bot, message.chat.id, db, up_to_id=message.message_id)
         await message.answer(render.text, reply_markup=markup)
         return
 
     summary, _points = await complete_quest(quest, render)
     await state.clear()
+    await auto_clean(bot, message.chat.id, db, up_to_id=message.message_id)
     await message.answer(
         f"{render.text}\n\n{summary}",
         reply_markup=after_quest_menu(),

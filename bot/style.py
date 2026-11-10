@@ -121,11 +121,6 @@ def points_line(points: int) -> str:
     return f"{sign}{number(points)}"
 
 
-def bullets(items: Iterable[str]) -> str:
-    """Список с буллетами."""
-    return "\n".join(f"• {item}" for item in items)
-
-
 def note(text: str) -> str:
     """Приглушённая сноска."""
     return f"<i>{text}</i>"
@@ -139,11 +134,6 @@ def question(text: str) -> str:
 def answer(text: str) -> str:
     """Правильный ответ в виде строки."""
     return f"Ответ: <b>{text}</b>"
-
-
-def hint(text: str) -> str:
-    """Блок-подсказка с отступом."""
-    return f"<blockquote>{text}</blockquote>"
 
 
 def footer(text: str = "") -> str:

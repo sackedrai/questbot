@@ -84,9 +84,13 @@ async def play_quest(
                 fake_bot,
             )
     elif game_type == "riddle":
-        await games.on_game_text(FakeMessage(payload["answers"][0], user), state)
+        await games.on_game_text(
+            FakeMessage(payload["answers"][0], user), state, fake_bot
+        )
     elif game_type == "word":
-        await games.on_game_text(FakeMessage(payload["word"].lower(), user), state)
+        await games.on_game_text(
+            FakeMessage(payload["word"].lower(), user), state, fake_bot
+        )
     elif game_type == "truth":
         choice = "t" if payload["a"] else "f"
         await games.on_game_callback(

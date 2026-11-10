@@ -16,16 +16,6 @@ from .games import GAME_TYPES, get_game
 # Без похожих символов (0/O, 1/I), чтобы код можно было продиктовать
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
-GAME_TITLES = {
-    "quiz": "🧠 Викторина",
-    "fast": "⚡ Быстрый квест",
-    "timeline": "🕰 Хронология",
-    "riddle": "🧩 Загадка",
-    "word": "🔤 Угадай слово",
-    "truth": "⚖️ Правда или ложь",
-    "math": "🧮 Счёт",
-}
-
 
 class ChallengeExists(RuntimeError):
     """У игрока уже есть открытый вызов."""

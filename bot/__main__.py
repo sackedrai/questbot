@@ -229,7 +229,11 @@ async def main() -> None:
 
     await db.connect()
     log.info("База данных подключена: %s", db.path)
-    purged = await db.purge_personal_fields()
+    try:
+        purged = await db.purge_personal_fields()
+    except Exception as exc:  # noqa: BLE001 - чистка не должна ронять бота
+        log.warning("Не удалось очистить личные поля: %r", exc)
+        purged = 0
     if purged:
         log.info("Очищено личных полей из базы: %s записей", purged)
     try:

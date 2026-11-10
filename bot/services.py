@@ -71,8 +71,9 @@ async def start_quest(
         avail = await availability(tg_id, risky=risky)
         if avail.state == STATE_ACTIVE:
             # показываем текущий незаконченный квест заново,
-            # чтобы не было тупика
-            active = await db.get_active_quest(tg_id)
+            # чтобы не было тупика. Ищем именно дневной: матч PvP
+            # не должен прятать его (и наоборот)
+            active = await db.get_active_quest(tg_id, pvp=False)
             if active is not None:
                 game = get_game(active["game_type"])
                 quest = Quest.from_row(active)
@@ -209,6 +210,14 @@ async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
         points = -RISK_PENALTY if quest.risky else 0
         breakdown = []
 
+    # Штраф за риск не может увести баланс в минус. Поэтому считаем
+    # фактически списанное: показывать «−10» при нуле на счету - враньё.
+    charged = 0
+    if points < 0:
+        before = await db.get_user(quest.tg_id)
+        balance = int(before["points"]) if before else 0
+        charged = min(-points, balance)
+
     await db.add_result(quest.tg_id, points, solved, count_quest=not is_pvp)
     await db.finish_quest(quest.id, points, "done" if solved else "failed")
 
@@ -255,7 +264,7 @@ async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
     else:
         if points < 0:
             tail = (
-                f"💸 Списано очков: <b>{style.points_line(points)}</b>\n"
+                f"💸 Списано очков: <b>{style.points_line(-charged)}</b>\n"
                 "Серия не прервана — можно попробовать ещё раз."
             )
         else:

@@ -116,11 +116,17 @@ class UserQuizGame(QuizGame):
         try:
             index = int(choice)
         except ValueError:
-            return Render(text="Некорректный выбор.")
+            return Render(
+                text="Некорректный выбор.",
+                keep_markup=cls.render(quest).markup,
+            )
 
         options = payload["options"]
         if not 0 <= index < len(options):
-            return Render(text="Некорректный выбор.")
+            return Render(
+                text="Некорректный выбор.",
+                keep_markup=cls.render(quest).markup,
+            )
 
         correct = payload["correct"]
         answer = html.escape(str(options[correct]))

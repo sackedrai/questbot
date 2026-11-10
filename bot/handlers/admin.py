@@ -335,9 +335,13 @@ async def _players_picker() -> str:
 
 
 async def _players_markup() -> InlineKeyboardMarkup:
-    """Клавиатура выбора игрока."""
+    """Клавиатура выбора игрока.
+
+    Игроков показываем не больше 20: Telegram принимает максимум 100
+    кнопок в одном сообщении, а при большем числе запрос просто падает.
+    """
     builder = InlineKeyboardBuilder()
-    for user in await db.all_users():
+    for user in (await db.all_users())[:20]:
         name = user["nickname"] or str(user["tg_id"])
         builder.button(
             text=f"{name[:18]} · {user['points']} очк",

@@ -108,7 +108,14 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot) -> None:
     if "pvp_" in text:
         from .pvp import accept_flow
 
-        code = text.split("pvp_", 1)[1].split()[0].strip().upper()
+        parts = text.split("pvp_", 1)[1].split()
+        code = parts[0].strip().upper() if parts else ""
+        if not code:
+            await message.answer(
+                style.note("В ссылке нет кода вызова. Попроси друга прислать её целиком."),
+                reply_markup=main_menu(),
+            )
+            return
         user = await db.get_user(tg_id)
         if user is None:
             await db.create_user(tg_id)
@@ -140,7 +147,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot) -> None:
     )
 
 
-@router.message(Onboarding.nickname, F.text)
+@router.message(Onboarding.nickname, F.text, ~F.text.startswith("/"))
 async def on_nickname(message: Message, state: FSMContext, bot: Bot) -> None:
     nickname = html.escape(message.text.strip()[:20]) or "Аноним"
     await db.set_nickname(message.from_user.id, nickname)
@@ -228,10 +235,28 @@ async def cmd_tz(message: Message, bot: Bot) -> None:
     )
 
 
+async def _finish_tz(state: FSMContext) -> None:
+    """Закончить ввод часового пояса.
+
+    Возвращаем игрока туда, откуда он пришёл: если он менял пояс посреди
+    текстового квеста, тот квест должен остаться активным.
+    """
+    data = await state.get_data()
+    previous = data.get("tz_prev_state")
+    await state.update_data(tz_prev_state=None)
+    if previous:
+        await state.set_state(previous)
+    else:
+        await state.clear()
+
+
 @router.callback_query(F.data.startswith("tz:"))
 async def on_tz(callback: CallbackQuery, state: FSMContext) -> None:
     value = callback.data.split(":", 1)[1]
     if value == "custom":
+        # запоминаем, где игрок был: смена пояса не должна выбивать
+        # его из активного текстового квеста
+        await state.update_data(tz_prev_state=await state.get_state())
         await state.set_state(Onboarding.tz)
         cancel = InlineKeyboardBuilder()
         cancel.button(text="🔙 В меню", callback_data="menu:home")
@@ -249,9 +274,13 @@ async def on_tz(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer()
         return
 
-    offset = int(value)
+    try:
+        offset = int(value)
+    except (TypeError, ValueError):
+        await callback.answer("Некорректный часовой пояс", show_alert=True)
+        return
     await db.set_tz(callback.from_user.id, offset)
-    await state.clear()
+    await _finish_tz(state)
     await safe_edit(
         callback.message,
         "\n".join(
@@ -265,25 +294,29 @@ async def on_tz(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(Onboarding.tz, F.text)
+@router.message(Onboarding.tz, F.text, ~F.text.startswith("/"))
 async def on_tz_custom(message: Message, state: FSMContext, bot: Bot) -> None:
     raw = message.text.strip().replace(",", ".")
     try:
         offset = int(float(raw))
     except ValueError:
+        # сценарий сбрасываем: иначе игрок навсегда застревает здесь
+        # и не может ответить ни на один вопрос
+        await state.clear()
         await message.answer(
             style.note("Нужно число. Например: 3 или -5."),
             reply_markup=main_menu(),
         )
         return
     if not -12 <= offset <= 14:
+        await state.clear()
         await message.answer(
             style.note("Смещение должно быть от -12 до 14."),
             reply_markup=main_menu(),
         )
         return
     await db.set_tz(message.from_user.id, offset)
-    await state.clear()
+    await _finish_tz(state)
     await open_screen(
         bot,
         message,
@@ -332,7 +365,8 @@ async def cmd_clear(message: Message, bot: Bot) -> None:
                 style.header("🧹", "ЧАТ ОЧИЩЕН"),
                 style.note(f"Удалено сообщений: {deleted} из {total}"),
             ]
-        )
+        ),
+        reply_markup=main_menu(),
     )
 
 
@@ -359,16 +393,6 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
             ),
             main_menu(),
         )
-    elif action == "quest":
-        from .quests import cmd_quest
-
-        await cmd_quest(callback.message, state, bot)
-        await callback.answer()
-    elif action == "risk":
-        from .quests import cmd_risk
-
-        await cmd_risk(callback.message, state, bot)
-        await callback.answer()
     elif action == "next":
         avail = await availability(tg_id)
         if avail.state == STATE_COOLDOWN:
@@ -398,7 +422,6 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
                 ]
             )
         await safe_edit(callback.message, text, main_menu())
-        await callback.answer()
     elif action == "ask":
         from .ask import ask_home_markup, build_ask_home_text
 

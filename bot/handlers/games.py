@@ -49,7 +49,10 @@ async def on_game_callback(
     await db.update_quest_payload(quest.id, quest.payload)
 
     if render.outcome is None:
-        await safe_edit(callback.message, render.text, render.markup)
+        # клавиатуру нельзя терять: без неё экран квеста превращается
+        # в тупик (нельзя ни ответить, ни сдаться)
+        markup = render.markup or render.keep_markup
+        await safe_edit(callback.message, render.text, markup)
         await callback.answer()
         return
 
@@ -153,7 +156,8 @@ async def on_game_text(message: Message, state: FSMContext) -> None:
     await db.update_quest_payload(quest.id, quest.payload)
 
     if render.outcome is None:
-        await message.answer(render.text, reply_markup=render.markup)
+        markup = render.markup or render.keep_markup
+        await message.answer(render.text, reply_markup=markup)
         return
 
     summary, _points = await complete_quest(quest, render)

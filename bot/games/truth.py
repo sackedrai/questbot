@@ -74,7 +74,10 @@ class TruthGame(BaseGame):
         payload = quest.payload
         choice = (choice or "").strip().lower()
         if choice not in ("t", "f"):
-            return Render(text="Некорректный выбор.")
+            return Render(
+                text="Некорректный выбор.",
+                keep_markup=cls.render(quest).markup,
+            )
 
         said_true = choice == "t"
         is_true = bool(payload["a"])

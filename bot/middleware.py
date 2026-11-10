@@ -17,6 +17,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message
 
 from .db import db
+from .selfcheck import SELFCHECK_MESSAGE_ID
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +51,11 @@ class ErrorCounterMiddleware(BaseMiddleware):
     async def _remember(self, event: Any) -> None:
         """Запомнить сообщение игрока - чтобы потом удалить его из чата."""
         if not isinstance(event, Message) or not event.message_id:
+            return
+        # Фейковое сообщение самопроверки запоминать не надо: оно не
+        # существует в Telegram, и без этой проверки таблица messages
+        # росла бы на строку каждые полчаса.
+        if event.message_id == SELFCHECK_MESSAGE_ID:
             return
         try:
             await db.track_message(event.chat.id, event.message_id, "user")

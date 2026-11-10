@@ -197,16 +197,6 @@ async def _my_questions_text(tg_id: int) -> str:
     return "\n".join(lines)
 
 
-@router.callback_query(F.data == "ask:home")
-async def on_ask_home(callback: CallbackQuery) -> None:
-    await safe_edit(
-        callback.message,
-        await build_ask_home_text(callback.from_user.id),
-        ask_home_markup(),
-    )
-    await callback.answer()
-
-
 @router.callback_query(F.data == "ask:new")
 async def on_ask_new(callback: CallbackQuery, state: FSMContext) -> None:
     if not await _can_ask(callback.from_user.id):

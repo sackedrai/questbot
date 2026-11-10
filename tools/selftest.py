@@ -24,7 +24,7 @@ for stream in (sys.stdout, sys.stderr):
 from bot import content  # noqa: E402
 from bot.config import BASE_POINTS  # noqa: E402
 from bot.db import Database  # noqa: E402
-from bot.games import GAMES, Quest, get_game  # noqa: E402
+from bot.games import GAMES, Quest, Render, get_game  # noqa: E402
 from bot.scoring import calculate_points, level_for_points, progress_bar  # noqa: E402
 from tools._testing import Tally, patch_db  # noqa: E402
 
@@ -1565,6 +1565,136 @@ async def test_new_games() -> None:
     check(payload["_key"].startswith("math:"), f"есть ключ: {payload['_key']}")
 
 
+async def test_quest_markup_survives() -> None:
+    """Ошибка в игре не должна срывать клавиатуру с экрана квеста.
+
+    Регрессия: «Некорректный выбор» возвращал Render без разметки,
+    и Telegram убирал кнопки с экрана. Игрок оставался без кнопок
+    вообще - ни ответить, ни сдаться.
+    """
+    section("Клавиатура квеста при ошибке")
+
+    from bot.games import GAME_TYPES, get_game
+
+    rng = random.Random(5)
+    for game_type in GAME_TYPES:
+        game = get_game(game_type)
+        payload = await game.build("medium", rng)
+        if payload is None:
+            continue
+        quest = Quest(
+            id=1, tg_id=1, day="2026-10-21", game_type=game_type,
+            difficulty="medium", payload=payload,
+        )
+        render = await game.on_choice(quest, "999")
+        check(
+            render.markup is not None or render.keep_markup is not None,
+            f"{game_type}: клавиатура сохранилась при ошибке",
+        )
+
+    # текстовые игры: тоже не теряем кнопки
+    from bot.games.riddle import RiddleGame
+    from bot.games.word import WordGame
+
+    for game in (RiddleGame, WordGame):
+        payload = await game.build("medium", rng)
+        quest = Quest(
+            id=2, tg_id=1, day="2026-10-21", game_type=game.type,
+            difficulty="medium", payload=payload,
+        )
+        render = await game.on_choice(quest, "мусор")
+        check(
+            render.markup is not None or render.keep_markup is not None,
+            f"{game.type}: клавиатура сохранилась при чужом нажатии",
+        )
+
+
+async def test_pvp_does_not_hide_daily() -> None:
+    """Матч PvP не должен прятать дневной квест игрока."""
+    section("PvP и дневной квест")
+
+    import bot.services as services_module
+
+    db = Database(":memory:")
+    await db.connect()
+    patch_db(db)
+    try:
+        await db.create_user(1)
+        await db.set_nickname(1, "Игрок")
+
+        daily = await services_module.start_quest(1)
+        check(not daily.blocked, f"дневной квест выдан: {daily.quest_id}")
+
+        payload = {
+            "q": "Столица Франции?",
+            "options": ["Париж", "Лион"],
+            "correct": 0,
+            "cat": "География",
+        }
+        match = await services_module.start_quest(
+            1, pvp_id=42, game_type="quiz", difficulty="easy", payload=payload
+        )
+        check(not match.blocked, f"квест матча выдан: {match.quest_id}")
+
+        daily_now = await db.get_active_quest(1, pvp=False)
+        check(
+            daily_now is not None and daily_now["id"] == daily.quest_id,
+            f"дневной квест виден: {daily_now['id'] if daily_now else None}",
+        )
+        match_now = await db.get_active_quest(1, pvp=True)
+        check(
+            match_now is not None and match_now["pvp_id"] == 42,
+            f"квест матча виден: {match_now['pvp_id'] if match_now else None}",
+        )
+
+        # повторный запрос квеста возвращает дневной, а не матчевый
+        again = await services_module.start_quest(1)
+        check(
+            again.existing and again.quest_id == daily.quest_id,
+            f"повторный запрос вернул дневной квест: {again.quest_id}",
+        )
+    finally:
+        await db.close()
+
+
+async def test_risk_penalty_honest() -> None:
+    """Штраф за риск не обещает больше, чем реально списали."""
+    section("Штраф за рискованный квест")
+
+    import bot.services as services_module
+
+    db = Database(":memory:")
+    await db.connect()
+    patch_db(db)
+    try:
+        await db.create_user(1)
+        await db.set_nickname(1, "Игрок")
+        await db.add_result(1, 5, False)  # всего 5 очков
+
+        payload = {"q": "2+2?", "options": ["4", "5"], "correct": 0}
+        quest_id = await db.create_quest(
+            1, "2026-10-21", "quiz", "easy", payload, risky=True
+        )
+        row = await db.get_quest(quest_id)
+        quest = Quest.from_row(row)
+        render = Render(text="Нулевой", outcome="failed")
+
+        summary, points = await services_module.complete_quest(quest, render)
+        check(points == -10, f"расчёт штрафа: {points}")
+        user = await db.get_user(1)
+        check(user["points"] == 0, f"очки не ушли в минус: {user['points']}")
+        check(
+            "−5" in summary or "-5" in summary,
+            f"показано фактическое списание: {summary}",
+        )
+        check(
+            "−10" not in summary and "-10" not in summary,
+            f"не обещаем лишнего: {summary}",
+        )
+    finally:
+        await db.close()
+
+
 async def test_admin_list() -> None:
     """Несколько админов: список и права."""
     section("Список админов")
@@ -1616,6 +1746,9 @@ async def main() -> None:
     await test_adaptive_and_notify()
     await test_rotator()
     await test_user_questions()
+    await test_quest_markup_survives()
+    await test_pvp_does_not_hide_daily()
+    await test_risk_penalty_honest()
     await test_novice_level()
     await test_daily_pass_batch()
     await test_profile_and_top()

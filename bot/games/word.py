@@ -82,7 +82,11 @@ class WordGame(BaseGame):
         payload = quest.payload
         raw = text.strip()
         if not raw:
-            return Render(text="Пустое сообщение — отправь букву.", needs_input=True)
+            return Render(
+                text="Пустое сообщение — отправь букву.",
+                needs_input=True,
+                keep_markup=cls.render(quest).markup,
+            )
 
         word = payload["word"]
         wrong: list[str] = payload.setdefault("wrong", [])
@@ -94,6 +98,7 @@ class WordGame(BaseGame):
                 return Render(
                     text=f"Буква «{letter}» уже пробовал.",
                     needs_input=True,
+                    keep_markup=cls.render(quest).markup,
                 )
             if letter in word:
                 for index, char in enumerate(word):
@@ -112,7 +117,11 @@ class WordGame(BaseGame):
                         extra_mult=extra,
                         detail=word,
                     )
-                return Render(text=cls.render(quest).text, needs_input=True)
+                return Render(
+                    text=cls.render(quest).text,
+                    needs_input=True,
+                    keep_markup=cls.render(quest).markup,
+                )
 
             wrong.append(letter)
             payload["lives"] = payload.get("lives", WORD_LIVES) - 1
@@ -128,7 +137,11 @@ class WordGame(BaseGame):
                     outcome="failed",
                     detail=word,
                 )
-            return Render(text=cls.render(quest).text, needs_input=True)
+            return Render(
+                text=cls.render(quest).text,
+                needs_input=True,
+                keep_markup=cls.render(quest).markup,
+            )
 
         # игрок назвал слово целиком
         if normalize_answer(raw) == normalize_answer(word):

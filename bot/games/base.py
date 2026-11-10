@@ -101,6 +101,10 @@ class Render:
     extra_mult: float = 1.0
     needs_input: bool = False
     detail: str = ""
+    # Разметка, которую надо вернуть, если своя пустая. Без неё
+    # сообщение об ошибке («Некорректный выбор») срывает клавиатуру
+    # с экрана квеста - и игрок остаётся без кнопок вообще.
+    keep_markup: Optional[InlineKeyboardMarkup] = None
 
 
 def add_skip(
@@ -164,17 +168,15 @@ class BaseGame:
         raise NotImplementedError
 
     @classmethod
-    def skip_markup(cls, quest_id: int) -> InlineKeyboardMarkup:
-        """Кнопка отказа от квеста."""
-        builder = InlineKeyboardBuilder()
-        builder.button(text="⏭ Сдаться", callback_data=f"skip:{quest_id}")
-        builder.adjust(1)
-        return builder.as_markup()
-
-    @classmethod
     async def on_choice(cls, quest: Quest, choice: str) -> Render:
-        return Render(text="Этот квест не поддерживает нажатия.")
+        return Render(
+            text="Этот квест не поддерживает нажатия.",
+            keep_markup=cls.render(quest).markup,
+        )
 
     @classmethod
     async def on_text(cls, quest: Quest, text: str) -> Render:
-        return Render(text="Этот квест не принимает текстовый ответ.")
+        return Render(
+            text="Этот квест не принимает текстовый ответ.",
+            keep_markup=cls.render(quest).markup,
+        )

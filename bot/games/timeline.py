@@ -99,9 +99,15 @@ class TimelineGame(BaseGame):
         try:
             index = int(choice)
         except ValueError:
-            return Render(text="Некорректный выбор.")
+            return Render(
+                text="Некорректный выбор.",
+                keep_markup=cls.render(quest).markup,
+            )
         if not 0 <= index < len(items):
-            return Render(text="Некорректный выбор.")
+            return Render(
+                text="Некорректный выбор.",
+                keep_markup=cls.render(quest).markup,
+            )
 
         collected: list[int] = payload.setdefault("collected", [])
         if index in collected:

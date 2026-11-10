@@ -138,7 +138,13 @@ async def on_set(callback: CallbackQuery, state: FSMContext) -> None:
         return
 
     if action == "tz":
+        # запоминаем, где игрок был: смена пояса не должна выбивать
+        # его из активного текстового квеста
+        await state.update_data(tz_prev_state=await state.get_state())
         await state.set_state(Onboarding.tz)
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🔙 В меню", callback_data="menu:home")
+        builder.adjust(1)
         await safe_edit(
             callback.message,
             "\n".join(
@@ -147,6 +153,7 @@ async def on_set(callback: CallbackQuery, state: FSMContext) -> None:
                     style.note("Напиши смещение в часах от UTC. Например: 3 или -5."),
                 ]
             ),
+            builder.as_markup(),
         )
         await callback.answer()
         return

@@ -457,13 +457,22 @@ class Database:
         )
         await self.db.commit()
 
-    async def get_active_quest(self, tg_id: int) -> Optional[aiosqlite.Row]:
-        """Последний незавершённый квест игрока."""
-        async with self.db.execute(
-            "SELECT * FROM quests WHERE tg_id = ? AND status = 'active'"
-            " ORDER BY id DESC LIMIT 1",
-            (tg_id,),
-        ) as cur:
+    async def get_active_quest(
+        self, tg_id: int, pvp: Optional[bool] = None
+    ) -> Optional[aiosqlite.Row]:
+        """Последний незавершённый квест игрока.
+
+        ``pvp`` - фильтр по типу: True только матч, False только дневной,
+        None любой. Нужен, потому что матч PvP и дневной квест могут
+        висеть одновременно, и один не должен прятать другой.
+        """
+        sql = "SELECT * FROM quests WHERE tg_id = ? AND status = 'active'"
+        params: tuple[Any, ...] = (tg_id,)
+        if pvp is not None:
+            sql += " AND (pvp_id > 0) = ?"
+            params = (tg_id, 1 if pvp else 0)
+        sql += " ORDER BY id DESC LIMIT 1"
+        async with self.db.execute(sql, params) as cur:
             return await cur.fetchone()
 
     async def finish_quest(self, quest_id: int, points: int, status: str) -> None:
@@ -876,17 +885,6 @@ class Database:
                 )
         await self.db.commit()
         return await self.get_pvp_match(match_id)
-
-    async def pvp_rating(self, limit: int = 10) -> list[aiosqlite.Row]:
-        """Рейтинг PvP: победы, поражения, очки."""
-        async with self.db.execute(
-            "SELECT tg_id, nickname, username, display_name, pvp_wins, pvp_losses,"
-            " pvp_points FROM users"
-            " WHERE pvp_wins > 0 OR pvp_losses > 0"
-            " ORDER BY pvp_wins DESC, pvp_points DESC, pvp_losses ASC LIMIT ?",
-            (limit,),
-        ) as cur:
-            return list(await cur.fetchall())
 
     # ------------------------------------------------------------------
     # адаптивная сложность

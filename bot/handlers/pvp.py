@@ -88,20 +88,42 @@ async def accept_flow(message: Message, bot: Bot, code: str) -> None:
                     style.header("❓", "ВЫЗОВ НЕ НАЙДЕН"),
                     style.note("Проверь код или попроси друга прислать ссылку целиком."),
                 ]
-            )
+            ),
+            reply_markup=main_menu(),
         )
         return
     if status == "self":
-        await message.answer(style.note("Нельзя вызвать самого себя 😄"))
+        await message.answer(
+            style.note("Нельзя вызвать самого себя 😄"),
+            reply_markup=main_menu(),
+        )
         return
     if status == "taken":
-        await message.answer(style.note("Этот вызов уже приняли."))
+        await message.answer(
+            style.note("Этот вызов уже приняли."),
+            reply_markup=main_menu(),
+        )
         return
     if status == "closed":
-        await message.answer(style.note("Этот матч уже закончился."))
+        await message.answer(
+            style.note("Этот матч уже закончился."),
+            reply_markup=main_menu(),
+        )
         return
 
-    payload = json.loads(match["payload"])
+    try:
+        payload = json.loads(match["payload"] or "{}")
+    except (TypeError, ValueError):
+        await message.answer(
+            "\n".join(
+                [
+                    style.header("⚠️", "МАТЧ ПОВРЕЖДЁН"),
+                    style.note("Задание матча не читается. Попробуй вызвать соперника заново."),
+                ]
+            ),
+            reply_markup=main_menu(),
+        )
+        return
     for player_id in (match["player1"], match["player2"]):
         result = await start_quest(
             player_id,
@@ -137,6 +159,7 @@ async def accept_flow(message: Message, bot: Bot, code: str) -> None:
                 style.note("Квест у обоих одинаковый. Удачи!"),
             ]
         ),
+        reply_markup=main_menu(),
     )
 
 

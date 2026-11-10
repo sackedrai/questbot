@@ -333,6 +333,56 @@ async def main() -> None:
         f"/ask отвечает: {sent_ask[-1].text[:60] if sent_ask else None}",
     )
 
+    # --- 8.0.2. квест из меню достаётся нажавшему, а не боту ---
+    # Регрессия: в сообщении с меню автор - бот. Если код брал
+    # message.from_user.id, квест выдавался боту, а игрок получал
+    # «Сначала пройди регистрацию».
+    await db.create_user(778)
+    await db.set_nickname(778, "ИзМеню")
+    player778 = User(id=778, is_bot=False, first_name="ИзМеню")
+    chat778 = Chat(id=778, type="private")
+    bot_user = User(id=7980614608, is_bot=True, first_name="QuestBot")
+    bot_menu = Message(message_id=60, date=datetime.now(timezone.utc),
+                       chat=chat778, from_user=bot_user)
+    session.calls.clear()
+    cq_quest = CallbackQuery(id="cq_quest", from_user=player778,
+                             chat_instance="ci", data="menu:quest",
+                             message=bot_menu)
+    await dp.feed_update(bot, Update(update_id=60, callback_query=cq_quest))
+    edited_quest = [c for c in session.calls if isinstance(c, EditMessageText)]
+    check(
+        bool(edited_quest)
+        and "Сначала пройди регистрацию" not in edited_quest[-1].text,
+        f"квест из меню выдан игроку: "
+        f"{edited_quest[-1].text[:60] if edited_quest else None}",
+    )
+    active778 = await db.get_active_quest(778)
+    check(
+        active778 is not None and active778["tg_id"] == 778,
+        f"квест принадлежит игроку: "
+        f"{active778['tg_id'] if active778 else None}",
+    )
+    if active778 is not None:
+        await db.finish_quest(active778["id"], 0, "skipped")
+
+    # --- 8.0.3. команды не перехватываются состояниями онбординга ---
+    # Регрессия: Onboarding.nickname / Onboarding.tz стояли выше
+    # Command(...) и глотали команды - ник сохранялся как "/quest",
+    # а игрок навсегда застревал в ожидании числа.
+    await db.create_user(777)
+    await db.set_nickname(777, "")
+    session.calls.clear()
+    msg_nick = Message(message_id=61, date=datetime.now(timezone.utc),
+                       chat=Chat(id=777, type="private"),
+                       from_user=User(id=777, is_bot=False, first_name="Новичок"),
+                       text="/quest")
+    await dp.feed_update(bot, Update(update_id=61, message=msg_nick))
+    row_new = await db.get_user(777)
+    check(
+        row_new is not None and row_new["nickname"] != "/quest",
+        f"команда не ушла в ник: {row_new['nickname'] if row_new else None}",
+    )
+
     # --- 8.1. в меню возвращаемся без второго меню ---    # в чате мог остаться другой экран (например, вызов на бой)
     await db.track_message(555, 40, "auto")
     session.calls.clear()

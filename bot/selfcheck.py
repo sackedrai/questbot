@@ -26,6 +26,10 @@ log = logging.getLogger(__name__)
 
 SELFCHECK_COMMAND = "/__selfcheck"
 
+# Номер фейкового сообщения самопроверки. По нему middleware понимает,
+# что сообщение ненастоящее, и не запоминает его для очистки чата.
+SELFCHECK_MESSAGE_ID = 999_999_999
+
 # Как часто бот проверяет себя
 SELFCHECK_INTERVAL = 1800  # 30 минут
 
@@ -45,7 +49,7 @@ async def run_self_check(dp: Dispatcher, bot: Bot, chat_id: int = 0) -> bool:
     fake_user = User(id=chat_id or 1, is_bot=False, first_name="Selfcheck")
     fake_chat = Chat(id=chat_id or 1, type="private")
     message = Message(
-        message_id=999_999_999,
+        message_id=SELFCHECK_MESSAGE_ID,
         date=datetime.now(timezone.utc),
         chat=fake_chat,
         from_user=fake_user,

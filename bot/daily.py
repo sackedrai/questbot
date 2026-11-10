@@ -41,9 +41,6 @@ class Availability:
     def local_due(self) -> datetime:
         return self.due_at.astimezone(timezone.utc) + timedelta(hours=self.tz_offset)
 
-    def local_now(self) -> datetime:
-        return datetime.now(timezone.utc) + timedelta(hours=self.tz_offset)
-
     def human_left(self) -> str:
         """Сколько осталось ждать - человеческим языком."""
         seconds = self.seconds_left
@@ -100,7 +97,8 @@ async def availability(tg_id: int, risky: bool = False) -> Availability:
     tz = DEFAULT_TZ if tz_raw is None else int(tz_raw)
 
     active_started: Optional[float] = None
-    active = await db.get_active_quest(tg_id)
+    # дневной квест: матч PvP живёт своей жизнью и не занимает слот
+    active = await db.get_active_quest(tg_id, pvp=False)
     if active is not None:
         # квест, который висит дольше суток, протухает - иначе игрок
         # застревает на нём навсегда

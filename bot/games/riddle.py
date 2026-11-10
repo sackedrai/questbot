@@ -119,7 +119,10 @@ class RiddleGame(BaseGame):
     @classmethod
     async def on_choice(cls, quest: Quest, choice: str) -> Render:
         if choice != "hint":
-            return Render(text="Некорректное действие.")
+            return Render(
+                text="Некорректное действие.",
+                keep_markup=cls.render(quest).markup,
+            )
         payload = quest.payload
         if payload.get("hint_used"):
             return Render(text="Подсказка уже была.", markup=cls.render(quest).markup)

@@ -341,7 +341,8 @@ async def main() -> None:
     await db.set_nickname(778, "ИзМеню")
     player778 = User(id=778, is_bot=False, first_name="ИзМеню")
     chat778 = Chat(id=778, type="private")
-    bot_user = User(id=7980614608, is_bot=True, first_name="QuestBot")
+    # id бота - вымышленный: настоящий не должен попадать в публичный код
+    bot_user = User(id=999000111, is_bot=True, first_name="QuestBot")
     bot_menu = Message(message_id=60, date=datetime.now(timezone.utc),
                        chat=chat778, from_user=bot_user)
     session.calls.clear()

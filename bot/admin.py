@@ -80,6 +80,42 @@ async def build_stats_text() -> str:
     return "\n".join(parts)
 
 
+async def build_funnel_text() -> str:
+    """Воронка: где игроки отваливаются.
+
+    Показывает путь от регистрации к регулярной игре. Если много
+    зарегистрировались, но не сыграли ни разу - проблема в первом
+    квесте; если играют раз и бросают - во втором.
+    """
+    funnel = await db.funnel_stats()
+    registered = max(funnel["registered"], 1)
+
+    def share(value: int) -> str:
+        return f"{value}  ({round(100 * value / registered)}%)"
+
+    parts = [
+        style.header("🔻", "ВОРОНКА ИГРОКОВ", "где люди отваливаются"),
+        style.stats(
+            [
+                ("", "Зарегистрировались", share(funnel["registered"])),
+                ("", "Сыграли хоть раз", share(funnel["played"])),
+                ("", "Сыграли от двух", share(funnel["played_twice"])),
+                ("", "Неделя игры", share(funnel["played_week"])),
+            ]
+        ),
+        style.section("⚠️ ОТТОК"),
+        style.stats(
+            [
+                ("", "Забили", str(funnel["churned"])),
+                ("", "Активны сегодня", str(funnel["active_today"])),
+            ]
+        ),
+        style.note("«Забили» - играл, но не заходил последнюю неделю."),
+    ]
+    parts.append(style.footer())
+    return "\n".join(parts)
+
+
 async def build_players_text(limit: int = 20) -> str:
     """Список игроков с их показателями."""
     users = await db.all_users()

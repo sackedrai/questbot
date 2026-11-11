@@ -9,7 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..content import FAST_QUIZ
 from .. import style
-from .base import Quest, Render, add_skip, pick_unseen
+from .base import Quest, Render, add_skip, pick_by_difficulty
 from .quiz import QuizGame
 
 
@@ -25,7 +25,9 @@ class FastGame(QuizGame):
         rng: random.Random,
         exclude: set[str] | None = None,
     ) -> dict[str, Any]:
-        item, exhausted = pick_unseen(FAST_QUIZ, cls.item_key, rng, exclude)
+        item, exhausted = pick_by_difficulty(
+            FAST_QUIZ, difficulty, cls.item_key, rng, exclude
+        )
         options = list(item["options"])
         order = list(range(len(options)))
         rng.shuffle(order)

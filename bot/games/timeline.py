@@ -10,7 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..config import TIMELINE_MAX_MISTAKES
 from ..content import TIMELINE_SETS
 from .. import style
-from .base import BaseGame, Quest, Render, add_skip, pick_unseen
+from .base import BaseGame, Quest, Render, add_skip, pick_by_difficulty
 
 
 class TimelineGame(BaseGame):
@@ -26,9 +26,16 @@ class TimelineGame(BaseGame):
     ) -> dict[str, Any]:
         # Явно сортируем по числовому ключу — так порядок не зависит от
         # того, как события лежат в исходном наборе.
-        chosen, exhausted = pick_unseen(TIMELINE_SETS, cls.item_key, rng, exclude)
+        chosen, exhausted = pick_by_difficulty(
+            TIMELINE_SETS,
+            difficulty,
+            cls.item_key,
+            rng,
+            exclude,
+            diff_of=lambda group: str(group.get("diff", "")),
+        )
         items = sorted(
-            (dict(item) for item in chosen),
+            (dict(item) for item in chosen["items"]),
             key=lambda item: item["year_num"],
         )
         order = list(range(len(items)))
@@ -43,13 +50,15 @@ class TimelineGame(BaseGame):
         }
 
     @classmethod
-    def item_key(cls, item: list[dict[str, Any]]) -> str:
+    def item_key(cls, item: dict[str, Any]) -> str:
         # набор событий опознаём по его содержимому, порядок не важен
-        return "timeline:" + "|".join(sorted(str(e.get("text", "")) for e in item))
+        return "timeline:" + "|".join(
+            sorted(str(e.get("text", "")) for e in item.get("items", []))
+        )
 
     @classmethod
     def payload_key(cls, payload: dict[str, Any]) -> str:
-        return cls.item_key(list(payload.get("items", [])))
+        return cls.item_key({"items": list(payload.get("items", []))})
 
     @classmethod
     def render(cls, quest: Quest) -> Render:

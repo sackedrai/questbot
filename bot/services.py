@@ -126,7 +126,7 @@ async def start_quest(
                 payload = candidate
                 game_type = UserQuizGame.type
         if game_type is None:
-            game_type = rng.choice(GAME_TYPES)
+            game_type = await _pick_game_type(tg_id, rng)
     game = get_game(game_type)
 
     if payload is None:
@@ -179,6 +179,36 @@ async def start_quest(
         needs_input=render.needs_input,
         quest_id=quest_id,
     )
+
+
+async def _pick_game_type(tg_id: int, rng: random.Random) -> str:
+    """Выбрать тип игры с учётом того, в чём игрок проигрывает.
+
+    Раньше тип выбирался случайно, и игроку, который стабильно
+    проигрывает в «Хронологию», она выпадала так же часто, как
+    «Викторина». Теперь игры, где у игрока больше провалов, чем
+    побед, получают меньший вес.
+
+    Правило: при 3+ попытках и доле провалов от 60% вес игры падает
+    втрое. Игры, в которых у игрока мало попыток, не трогаем - рано
+    делать выводы.
+    """
+    stats = await db.game_type_stats(tg_id)
+    if not stats:
+        return rng.choice(GAME_TYPES)
+
+    weights: list[float] = []
+    for game_type in GAME_TYPES:
+        weight = 1.0
+        info = stats.get(game_type)
+        if info:
+            total = info["ok"] + info["fail"]
+            fail_share = info["fail"] / total if total else 0.0
+            if fail_share >= 0.6:
+                weight = 0.33
+        weights.append(weight)
+
+    return rng.choices(GAME_TYPES, weights=weights, k=1)[0]
 
 
 async def complete_quest(quest: Quest, render: Render) -> tuple[str, int]:
@@ -309,6 +339,139 @@ async def next_quest_line(tg_id: int) -> str:
     if avail.state == STATE_DUE:
         return "Доступен прямо сейчас"
     return f"в {avail.human_due()}  ·  {avail.human_left()}"
+
+
+async def build_pvp_history_text(tg_id: int) -> str:
+    """История боёв: с кем играл игрок и с каким счётом."""
+    matches = await db.pvp_history(tg_id, limit=10)
+    if not matches:
+        return "\n".join(
+            [
+                style.header("⚔️", "ИСТОРИЯ БОЁВ", "пока пусто"),
+                style.note(
+                    "Ты ещё не играл на бой. Вызови кого-нибудь - "
+                    "«Вызвать на бой» в главном меню."
+                ),
+            ]
+        )
+
+    user = await db.get_user(tg_id)
+    my_points = int(user["points"]) if user else 0
+
+    wins = 0
+    losses = 0
+    draws = 0
+    lines = []
+    for match in matches:
+        i_am_first = int(match["player1"]) == tg_id
+        my = int(match["points1"]) if i_am_first else int(match["points2"])
+        their = int(match["points2"]) if i_am_first else int(match["points1"])
+        opponent_id = int(match["player2"]) if i_am_first else int(match["player1"])
+        opponent = await db.get_user(opponent_id)
+        name = (opponent["nickname"] if opponent else "") or "Без имени"
+
+        winner = int(match["winner"] or 0)
+        if winner == tg_id:
+            mark = "🏆"
+            wins += 1
+        elif winner:
+            mark = "😔"
+            losses += 1
+        else:
+            mark = "🤝"
+            draws += 1
+
+        lines.append(f"{mark} {name}  ·  {my} : {their}")
+
+    parts = [
+        style.header(
+            "⚔️",
+            "ИСТОРИЯ БОЁВ",
+            f"{len(matches)} "
+            + style.plural(len(matches), "матч", "матча", "матчей"),
+        ),
+        style.stats(
+            [
+                ("", "Побед", str(wins)),
+                ("", "Поражений", str(losses)),
+                ("", "Ничьих", str(draws)),
+                ("", "Всего очков", style.number(my_points)),
+            ]
+        ),
+        style.section("МАТЧИ"),
+        "\n".join(lines),
+    ]
+    if wins:
+        parts.append(
+            style.note(
+                f"Побед: {wins}. "
+                + ("Защищай серию!" if wins > losses else "Есть куда расти.")
+            )
+        )
+    return "\n".join(parts)
+
+
+async def build_week_text(tg_id: int) -> str:
+    """Еженедельная сводка: итоги недели и на кого смотреть.
+
+    Две функции: показать игроку, как он сыграл за неделю (это
+    удерживает - человек видит прогресс), и показать, сколько
+    отстаёт от соперника (это мотивирует).
+    """
+    user = await db.get_user(tg_id)
+    if user is None:
+        return "Сначала пройди регистрацию: /start"
+
+    summary = await db.week_summary(tg_id)
+    nickname = user["nickname"] or "Ты"
+
+    parts = [
+        style.header("📅", "НЕДЕЛЯ", f"{nickname} · итоги за 7 дней"),
+        style.stats(
+            [
+                ("", "Квестов", str(summary["total"])),
+                ("", "Очков", style.number(summary["points"])),
+                ("", "Успешно", f"{summary['done']} ({summary['accuracy']}%)"),
+                ("", "Провалено", str(summary["failed"])),
+            ]
+        ),
+    ]
+
+    if not summary["total"]:
+        parts.append(
+            style.note(
+                f"На этой неделе "
+                f"{style.plural(summary['total'], 'квеста', 'квестов', 'квестов')} "
+                "ещё не было. "
+                "Начни с сегодняшнего - очки зачтутся в сводку."
+            )
+        )
+        return "\n".join(parts)
+
+    rivals = await db.chasing_players(tg_id, limit=3)
+    if rivals:
+        gap = int(rivals[0]["points"]) - int(user["points"])
+        if gap > 0:
+            parts.append(style.section("🎯 КОГО ДОГОНЯТЬ"))
+            rows = []
+            for row in rivals:
+                name = row["nickname"] or "Без имени"
+                diff = int(row["points"]) - int(user["points"])
+                rows.append(("", name, f"+{style.number(diff)}"))
+            parts.append(style.stats(rows))
+            parts.append(
+                style.note(
+                    f"До {rivals[0]['nickname'] or 'соперника'} "
+                    f"не хватает {style.number(gap)} очков - "
+                    "это пара квестов."
+                )
+            )
+    else:
+        parts.append(
+            style.note("Ты впереди всех в общем зачёте. Так держать!")
+        )
+
+    return "\n".join(parts)
 
 
 async def build_profile_text(tg_id: int) -> str:

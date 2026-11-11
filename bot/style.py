@@ -121,6 +121,24 @@ def points_line(points: int) -> str:
     return f"{sign}{number(points)}"
 
 
+def plural(count: int, one: str, few: str, many: str) -> str:
+    """Согласовать существительное с числом.
+
+    ``plural(1, "матч", "матча", "матчей")`` -> "матч",
+    ``plural(3, ...)`` -> "матча", ``plural(5, ...)`` -> "матчей".
+    Без этого получается «последние 1 матчей».
+    """
+    tail = count % 100
+    if 11 <= tail <= 14:
+        return many
+    tail = count % 10
+    if tail == 1:
+        return one
+    if 2 <= tail <= 4:
+        return few
+    return many
+
+
 def note(text: str) -> str:
     """Приглушённая сноска."""
     return f"<i>{text}</i>"

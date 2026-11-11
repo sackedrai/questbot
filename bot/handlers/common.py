@@ -12,7 +12,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..db import db
 from ..keyboards import main_menu, top_menu
-from ..services import build_profile_text, build_top_text, start_quest
+from ..services import (
+    build_profile_text,
+    build_pvp_history_text,
+    build_top_text,
+    build_week_text,
+    start_quest,
+)
 from ..daily import availability, STATE_ACTIVE, STATE_COOLDOWN
 from ..states import Game, Onboarding
 from .. import style
@@ -164,6 +170,30 @@ async def on_nickname(message: Message, state: FSMContext, bot: Bot) -> None:
                 style.note("Твой первый квест уже ждёт."),
             ]
         ),
+        reply_markup=main_menu(),
+    )
+
+
+@router.message(Command("battles"))
+async def cmd_battles(message: Message, bot: Bot) -> None:
+    """История боёв: с кем играл и с каким счётом."""
+    await open_screen(
+        bot,
+        message,
+        db,
+        await build_pvp_history_text(message.from_user.id),
+        reply_markup=main_menu(),
+    )
+
+
+@router.message(Command("week"))
+async def cmd_week(message: Message, bot: Bot) -> None:
+    """Еженедельная сводка: итоги за неделю и соперники."""
+    await open_screen(
+        bot,
+        message,
+        db,
+        await build_week_text(message.from_user.id),
         reply_markup=main_menu(),
     )
 
@@ -434,6 +464,14 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
         await safe_edit(callback.message, HELP_TEXT, main_menu())
     elif action == "profile":
         await safe_edit(callback.message, await build_profile_text(tg_id), main_menu())
+    elif action == "week":
+        await safe_edit(
+            callback.message, await build_week_text(tg_id), main_menu()
+        )
+    elif action == "battles":
+        await safe_edit(
+            callback.message, await build_pvp_history_text(tg_id), main_menu()
+        )
     elif action == "ach":
         from ..achievements import build_achievements_text
 

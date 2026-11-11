@@ -10,7 +10,14 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from ..config import HINT_PENALTY
 from ..content import RIDDLES
 from .. import style
-from .base import BaseGame, Quest, Render, add_skip, is_answer_match, pick_unseen
+from .base import (
+    BaseGame,
+    Quest,
+    Render,
+    add_skip,
+    is_answer_match,
+    pick_by_difficulty,
+)
 
 MAX_TRIES = 5
 
@@ -26,7 +33,9 @@ class RiddleGame(BaseGame):
         rng: random.Random,
         exclude: set[str] | None = None,
     ) -> dict[str, Any]:
-        item, exhausted = pick_unseen(RIDDLES, cls.item_key, rng, exclude)
+        item, exhausted = pick_by_difficulty(
+            RIDDLES, difficulty, cls.item_key, rng, exclude
+        )
         return {
             "q": item["q"],
             "answers": list(item["answers"]),

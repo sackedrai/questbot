@@ -59,7 +59,7 @@ def test_content() -> None:
     valid_riddles = all(i["answers"] and i["hint"] for i in content.RIDDLES)
     check(valid_riddles, "у всех загадок есть ответы и подсказка")
 
-    valid_sets = all(4 <= len(s) <= 5 for s in content.TIMELINE_SETS)
+    valid_sets = all(4 <= len(s["items"]) <= 5 for s in content.TIMELINE_SETS)
     check(valid_sets, "все наборы хронологии содержат 4-5 событий")
 
     valid_truth = all(
@@ -75,6 +75,9 @@ def test_content() -> None:
     for label, items in (
         ("викторина", content.QUIZ),
         ("правда/ложь", content.TRUE_FALSE),
+        ("быстрый вопрос", content.FAST_QUIZ),
+        ("загадка", content.RIDDLES),
+        ("угадай слово", content.WORDS),
     ):
         levels = {i.get("diff") for i in items}
         check(
@@ -82,8 +85,14 @@ def test_content() -> None:
             f"в пуле «{label}» есть все сложности: {sorted(levels)}",
         )
 
+    timeline_levels = {s.get("diff") for s in content.TIMELINE_SETS}
+    check(
+        {"easy", "medium", "hard"} <= timeline_levels,
+        f"в пуле «хронология» есть все сложности: {sorted(timeline_levels)}",
+    )
+
     sorted_sets = all(
-        all(a["year_num"] < b["year_num"] for a, b in zip(s, s[1:]))
+        all(a["year_num"] < b["year_num"] for a, b in zip(s["items"], s["items"][1:]))
         for s in content.TIMELINE_SETS
     )
     check(sorted_sets, "все наборы хронологии идут строго по возрастанию дат")
@@ -122,6 +131,55 @@ def test_scoring() -> None:
     level2, _, _ = level_for_points(1500)
     check(level2 > 1, f"уровень растёт: {level2}")
     check(progress_bar(5, 10) == "█████░░░░░", "полоска прогресса считается")
+
+
+async def test_difficulty_respected() -> None:
+    """Сложность должна влиять на выбор задания во всех играх.
+
+    Регрессия: раньше фильтр по сложности был только у викторины и
+    «Правда или ложь». Остальные пять игр выбирали из всего пула, и
+    игроку с уровнем «Лёгкий» выпадало то же самое, что с «Сложным».
+    """
+    section("Сложность влияет на выбор")
+
+    from bot.games import GAME_TYPES
+
+    # для каждой игры собираем, какие задания достаются на «лёгком»
+    # и на «сложном», и сравниваем
+    for game_type in GAME_TYPES:
+        game = get_game(game_type)
+        easy_picks: set[str] = set()
+        hard_picks: set[str] = set()
+        for level, bucket in (("easy", easy_picks), ("hard", hard_picks)):
+            rng = random.Random(11)
+            for _ in range(40):
+                payload = await game.build(level, rng)
+                if payload is None:
+                    break
+                bucket.add(_describe_item(game_type, payload))
+
+        # «Счёт» генерирует примеры: там достаточно разной сложности
+        if game_type == "math":
+            continue
+        check(
+            easy_picks != hard_picks,
+            f"{game_type}: лёгкое и сложное - разные задания",
+        )
+
+
+def _describe_item(game_type: str, payload: dict) -> str:
+    """Ключ задания для сравнения наборов."""
+    if game_type in ("quiz", "fast"):
+        return str(payload.get("q", ""))
+    if game_type == "word":
+        return str(payload.get("word", ""))
+    if game_type == "riddle":
+        return str(payload.get("q", ""))
+    if game_type == "truth":
+        return str(payload.get("t", ""))
+    if game_type == "timeline":
+        return "|".join(str(i.get("text", "")) for i in payload.get("items", []))
+    return str(payload)
 
 
 async def test_games() -> None:
@@ -974,8 +1032,6 @@ async def test_migration_old_db() -> None:
     import sqlite3
     import tempfile
 
-    import bot.db as db_module
-
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "old.db"
         con = sqlite3.connect(str(path))
@@ -1021,8 +1077,11 @@ async def test_migration_old_db() -> None:
             await db.close()
 
     # при ошибке схемы соединение должно закрываться, иначе процесс зависнет
-    original = db_module.SCHEMA
-    db_module.SCHEMA = original + "CREATE INDEX broken ON quests (нет_такой_колонки);"
+    # подменяем схему там, где её читает подключение: bot.db.base
+    import bot.db.base as db_base
+
+    original = db_base.SCHEMA
+    db_base.SCHEMA = original + "CREATE INDEX broken ON quests (нет_такой_колонки);"
     bad = Database(":memory:")
     try:
         await bad.connect()
@@ -1030,7 +1089,7 @@ async def test_migration_old_db() -> None:
     except Exception:
         check(bad._db is None, "после ошибки соединение закрыто")
     finally:
-        db_module.SCHEMA = original
+        db_base.SCHEMA = original
 
 
 async def test_profile_and_top() -> None:
@@ -1695,6 +1754,171 @@ async def test_risk_penalty_honest() -> None:
         await db.close()
 
 
+async def test_retention_features() -> None:
+    """Удержание: недельная сводка, «ты отстал», история боёв, воронка."""
+    section("Удержание")
+
+    import bot.services as services
+
+    db = Database(":memory:")
+    await db.connect()
+    patch_db(db)
+    try:
+        await db.create_user(1)
+        await db.set_nickname(1, "Вася")
+        await db.create_user(2)
+        await db.set_nickname(2, "Петя")
+
+        # Петя впереди - Васе покажут, кого догонять
+        await db.add_result(2, 500, True)
+        await db.add_result(1, 120, True)
+
+        # квесты текущей недели: сводка считает именно их
+        from bot.db import today_iso
+
+        today = today_iso()
+        for points in (120, 60):
+            quest_id = await db.create_quest(
+                1, today, "quiz", "easy", {"q": "?"}
+            )
+            await db.finish_quest(quest_id, points, "done")
+        quest_id = await db.create_quest(1, today, "quiz", "easy", {"q": "?"})
+        await db.finish_quest(quest_id, 0, "failed")
+
+        week = await db.week_summary(1)
+        check(week["total"] >= 1, f"итоги недели посчитаны: {week}")
+        check(week["points"] > 0, f"очки недели: {week['points']}")
+        check(0 <= week["accuracy"] <= 100, f"точность: {week['accuracy']}%")
+
+        chasing = await db.chasing_players(1)
+        check(
+            bool(chasing) and int(chasing[0]["tg_id"]) == 2,
+            f"найден соперник впереди: {[r['nickname'] for r in chasing]}",
+        )
+        check(
+            all(int(r["points"]) > 120 for r in chasing),
+            "соперник действительно впереди",
+        )
+
+        week_text = await services.build_week_text(1)
+        check("НЕДЕЛЯ" in week_text, "недельная сводка собрана")
+        check("Петя" in week_text, "в сводке видно, кого догонять")
+
+        # история боёв
+        await db.create_pvp_match(
+            1, "quiz", "easy", {"q": "?", "options": ["a"], "correct": 0}, "CODE1"
+        )
+        match = await db.get_pvp_by_code("CODE1")
+        await db.accept_pvp(match["id"], 2)
+        await db.finish_pvp(match["id"], 1, 40)
+        await db.finish_pvp(match["id"], 2, 20)
+
+        history = await db.pvp_history(1)
+        check(len(history) == 1, f"история боёв: {len(history)} матч")
+        battles_text = await services.build_pvp_history_text(1)
+        check("ИСТОРИЯ БОЁВ" in battles_text, "экран истории боёв открывается")
+        check("Петя" in battles_text, "в истории видно соперника")
+        check("40 : 20" in battles_text, f"виден счёт: {battles_text}")
+
+        empty_text = await services.build_pvp_history_text(2)
+        check("ИСТОРИЯ БОЁВ" in empty_text, "пустая история не ломается")
+
+        # воронка для админки
+        import bot.admin as admin_module
+
+        funnel = await db.funnel_stats()
+        check(funnel["registered"] == 2, f"воронка: зарегистрировано {funnel['registered']}")
+        check(funnel["played"] == 2, f"воронка: играли {funnel['played']}")
+        funnel_text = await admin_module.build_funnel_text()
+        check("ВОРОНКА" in funnel_text, "экран воронки собран")
+    finally:
+        await db.close()
+
+
+async def test_word_game_softened() -> None:
+    """«Угадай слово»: жизни по длине слова и подсказка за штраф."""
+    section("Угадай слово")
+
+    from bot.games.word import WordGame
+
+    check(WordGame.lives_for("КОТ") == 5, f"короткое слово: {WordGame.lives_for('КОТ')}")
+    check(
+        WordGame.lives_for("КОМПЬЮТЕР") == 9,
+        f"длинное слово: {WordGame.lives_for('КОМПЬЮТЕР')}",
+    )
+    check(
+        WordGame.lives_for("КОМПЬЮТЕР") > WordGame.lives_for("КОТ"),
+        "длинному слову больше жизней",
+    )
+
+    rng = random.Random(3)
+    payload = await WordGame.build("medium", rng)
+    word = payload["word"]
+    check(
+        payload["lives"] == WordGame.lives_for(word),
+        f"жизни соответствуют длине слова ({len(word)}): {payload['lives']}",
+    )
+
+    quest = Quest(id=1, tg_id=1, day="2026-01-01", game_type="word",
+                  difficulty="medium", payload=payload)
+    render = WordGame.render(quest)
+    labels = [b.text for row in render.markup.inline_keyboard for b in row]
+    check(any("Подсказка" in label for label in labels), f"есть кнопка подсказки: {labels}")
+
+    hint = await WordGame.on_choice(quest, "hint")
+    check(hint.hint_used, "подсказка засчитана")
+    check(
+        len(payload["revealed"]) == 1,
+        f"подсказка открыла букву: {payload['revealed']}",
+    )
+    again = await WordGame.on_choice(quest, "hint")
+    check("уже была" in again.text.lower(), "вторую подсказку не дают")
+
+    # штраф за подсказку должен дойти до итогов
+    final = await WordGame.on_text(quest, word)
+    check(final.hint_used, "штраф за подсказку не теряется при ответе")
+
+
+async def test_game_type_adaptation() -> None:
+    """Игре, в которой игрок стабильно проигрывает, выдаётся реже."""
+    section("Подбор типа игры")
+
+    import bot.services as services_module
+
+    db = Database(":memory:")
+    await db.connect()
+    patch_db(db)
+    try:
+        await db.create_user(1)
+        await db.set_nickname(1, "Игрок")
+
+        # четыре провала в «timeline» и ни одного в «quiz»
+        for _ in range(4):
+            quest_id = await db.create_quest(
+                1, "2026-01-01", "timeline", "easy", {"items": []}
+            )
+            await db.finish_quest(quest_id, 0, "failed")
+        for _ in range(4):
+            quest_id = await db.create_quest(
+                1, "2026-01-01", "quiz", "easy", {"q": "?"}
+            )
+            await db.finish_quest(quest_id, 10, "done")
+
+        stats = await db.game_type_stats(1)
+        check("timeline" in stats, f"статистика по типам собрана: {list(stats)}")
+        check(stats["timeline"]["fail"] == 4, f"провалы учтены: {stats['timeline']}")
+
+        rng = random.Random(5)
+        picks = [await services_module._pick_game_type(1, rng) for _ in range(300)]
+        timeline_share = picks.count("timeline") / len(picks)
+        check(
+            timeline_share < 0.15,
+            f"проваленная игра выпадает реже: {round(timeline_share * 100)}%",
+        )
+    finally:
+        await db.close()
+
+
 async def test_admin_list() -> None:
     """Несколько админов: список и права."""
     section("Список админов")
@@ -1739,6 +1963,7 @@ async def main() -> None:
     test_scoring()
     test_greeting()
     await test_games()
+    await test_difficulty_respected()
     await test_new_games()
     await test_database()
     await test_tracking_session()
@@ -1749,6 +1974,9 @@ async def main() -> None:
     await test_quest_markup_survives()
     await test_pvp_does_not_hide_daily()
     await test_risk_penalty_honest()
+    await test_retention_features()
+    await test_word_game_softened()
+    await test_game_type_adaptation()
     await test_novice_level()
     await test_daily_pass_batch()
     await test_profile_and_top()

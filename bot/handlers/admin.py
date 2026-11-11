@@ -69,6 +69,17 @@ async def cmd_players(message: Message) -> None:
     )
 
 
+@router.message(Command("funnel"))
+async def cmd_funnel(message: Message) -> None:
+    """Воронка игроков: где они отваливаются."""
+    if not admin_mod.is_admin(message.from_user.id):
+        await message.answer(_denied())
+        return
+    await message.answer(
+        await admin_mod.build_funnel_text(), reply_markup=admin_menu()
+    )
+
+
 @router.message(Command("moderate"))
 async def cmd_moderate(message: Message) -> None:
     """Очередь вопросов игроков на модерацию."""
@@ -91,6 +102,8 @@ async def on_admin(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None
 
     if action == "stats":
         await _edit(callback, await admin_mod.build_stats_text(), admin_menu())
+    elif action == "funnel":
+        await _edit(callback, await admin_mod.build_funnel_text(), admin_menu())
     elif action == "players":
         await _edit(callback, await admin_mod.build_players_text(), admin_menu())
     elif action == "questions":

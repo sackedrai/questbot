@@ -9,7 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from ..content import TRUE_FALSE
 from .. import style
-from .base import BaseGame, Quest, Render, add_skip, pick_unseen
+from .base import BaseGame, Quest, Render, add_skip, pick_by_difficulty
 
 
 class TruthGame(BaseGame):
@@ -24,10 +24,9 @@ class TruthGame(BaseGame):
         rng: random.Random,
         exclude: set[str] | None = None,
     ) -> dict[str, Any]:
-        pool = [item for item in TRUE_FALSE if item.get("diff") == difficulty] or list(
-            TRUE_FALSE
+        item, exhausted = pick_by_difficulty(
+            TRUE_FALSE, difficulty, cls.item_key, rng, exclude
         )
-        item, exhausted = pick_unseen(pool, cls.item_key, rng, exclude)
         return {
             "t": item["t"],
             "a": bool(item["a"]),

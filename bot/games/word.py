@@ -7,15 +7,38 @@ from typing import Any
 
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from ..config import WORD_LIVES
+from ..config import HINT_PENALTY, WORD_LIVES
 from ..content import WORDS
 from .. import style
-from .base import BaseGame, Quest, Render, add_skip, normalize_answer, pick_unseen
+from .base import (
+    BaseGame,
+    Quest,
+    Render,
+    add_skip,
+    normalize_answer,
+    pick_by_difficulty,
+)
 
 
 class WordGame(BaseGame):
     type = "word"
     title = "Угадай слово"
+
+    @staticmethod
+    def lives_for(word: str) -> int:
+        """Сколько жизней у слова такой длины.
+
+        Раньше было 7 на любое слово, и «ЭКОСИСТЕМА» (11 букв) была
+        неугадываемой. Теперь чем длиннее слово, тем больше попыток.
+        """
+        length = len(word)
+        if length <= 4:
+            return 5
+        if length <= 6:
+            return 6
+        if length <= 8:
+            return 7
+        return 9
 
     @classmethod
     async def build(
@@ -24,14 +47,17 @@ class WordGame(BaseGame):
         rng: random.Random,
         exclude: set[str] | None = None,
     ) -> dict[str, Any]:
-        item, exhausted = pick_unseen(WORDS, cls.item_key, rng, exclude)
+        item, exhausted = pick_by_difficulty(
+            WORDS, difficulty, cls.item_key, rng, exclude
+        )
         word = item["w"]
         return {
             "word": word,
             "cat": item["cat"],
             "revealed": [],
             "wrong": [],
-            "lives": WORD_LIVES,
+            "lives": cls.lives_for(word),
+            "hint_used": False,
             "_key": cls.item_key(item),
             "_exhausted": exhausted,
         }
@@ -70,7 +96,19 @@ class WordGame(BaseGame):
             style.note("Отправь одну букву или всё слово целиком"),
         ]
         builder = InlineKeyboardBuilder()
-        add_skip(builder, quest.id, rows_before=0)
+        # Подсказка открывает одну букву, но стоит очков - как в загадке.
+        hint_shown = (
+            not payload.get("hint_used")
+            and len(revealed) < len(word)
+            and payload.get("lives", WORD_LIVES) > 0
+        )
+        if hint_shown:
+            builder.button(
+                text=f"💡 Подсказка (штраф ×{HINT_PENALTY})",
+                callback_data=f"g:{quest.id}:hint",
+            )
+            builder.adjust(1)
+        add_skip(builder, quest.id, rows_before=1 if hint_shown else 0)
         return Render(
             text="\n".join(lines),
             markup=builder.as_markup(),
@@ -115,6 +153,7 @@ class WordGame(BaseGame):
                         ),
                         outcome="solved",
                         extra_mult=extra,
+                        hint_used=bool(payload.get("hint_used")),
                         detail=word,
                     )
                 return Render(
@@ -135,6 +174,7 @@ class WordGame(BaseGame):
                         ]
                     ),
                     outcome="failed",
+                    hint_used=bool(payload.get("hint_used")),
                     detail=word,
                 )
             return Render(
@@ -155,6 +195,7 @@ class WordGame(BaseGame):
                 ),
                 outcome="solved",
                 extra_mult=extra,
+                hint_used=bool(payload.get("hint_used")),
                 detail=word,
             )
 
@@ -170,6 +211,7 @@ class WordGame(BaseGame):
                     ]
                 ),
                 outcome="failed",
+                hint_used=bool(payload.get("hint_used")),
                 detail=word,
             )
         return Render(
@@ -180,6 +222,42 @@ class WordGame(BaseGame):
                 ]
             ),
             needs_input=True,
+            keep_markup=cls.render(quest).markup,
+        )
+
+    @classmethod
+    async def on_choice(cls, quest: Quest, choice: str) -> Render:
+        """Подсказка: открывает одну неназванную букву."""
+        payload = quest.payload
+        if choice != "hint":
+            return Render(
+                text="Некорректное действие.",
+                keep_markup=cls.render(quest).markup,
+            )
+        if payload.get("hint_used"):
+            return Render(
+                text="Подсказка уже была.",
+                markup=cls.render(quest).markup,
+                needs_input=True,
+            )
+
+        word = payload["word"]
+        revealed: list[int] = payload.setdefault("revealed", [])
+        hidden = [i for i in range(len(word)) if i not in revealed]
+        if not hidden:
+            return Render(
+                text="Все буквы уже открыты.",
+                markup=cls.render(quest).markup,
+                needs_input=True,
+            )
+
+        payload["hint_used"] = True
+        revealed.append(hidden[0])
+        return Render(
+            text=cls.render(quest).text,
+            markup=cls.render(quest).markup,
+            needs_input=True,
+            hint_used=True,
         )
 
     @staticmethod

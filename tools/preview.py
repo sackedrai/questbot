@@ -168,6 +168,27 @@ async def _render(db: Database) -> None:
     show("СВОЙ ВОПРОС", await build_ask_home_text(1), ask_home_markup())
     show("МОИ ВОПРОСЫ", await _my_questions_text(1), _mine_markup())
 
+    # удержание: недельная сводка, история боёв
+    from bot.db import today_iso
+    from bot.keyboards import main_menu
+    from bot.services import build_pvp_history_text, build_week_text
+
+    # квесты текущей недели, чтобы сводка была не пустой
+    for points in (420, 380, 310, 240):
+        quest_id = await db.create_quest(1, today, "quiz", "medium", {"q": "?"})
+        await db.finish_quest(quest_id, points, "done")
+
+    # сыгранный матч для истории
+    match_id = await db.create_pvp_match(
+        1, "quiz", "medium", {"q": "?", "options": ["a"], "correct": 0}, "PREVW"
+    )
+    await db.accept_pvp(match_id, 2)
+    await db.finish_pvp(match_id, 1, 40)
+    await db.finish_pvp(match_id, 2, 20)
+
+    show("НЕДЕЛЯ", await build_week_text(1), main_menu())
+    show("ИСТОРИЯ БОЁВ", await build_pvp_history_text(1), main_menu())
+
     # результат
     from bot.services import complete_quest
     from bot.games import Render

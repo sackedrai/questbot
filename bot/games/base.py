@@ -33,6 +33,40 @@ def pick_unseen(
     return rng.choice(list(pool)), True
 
 
+def pick_by_difficulty(
+    pool: Sequence[Any],
+    difficulty: str,
+    key_of: Callable[[Any], str],
+    rng: Any,
+    exclude: Optional[set[str]] = None,
+    diff_of: Optional[Callable[[Any], str]] = None,
+) -> tuple[Any, bool]:
+    """Выбрать задание нужной сложности, не проходившееся раньше.
+
+    Раньше сложность влияла только на викторину и «Правда или ложь»:
+    остальные пять игр выбирали задание из всего пула, и игроку с
+    уровнем «🟢 Лёгкий» могло выпасть то же самое, что и с «🔴 Сложный».
+    Теперь фильтр общий для всех игр.
+
+    ``diff_of`` - как достать сложность из элемента. По умолчанию это
+    поле ``diff`` (у хронологии сложность лежит на наборе, а не на
+    событии, поэтому там передают свою функцию).
+
+    Если заданий нужной сложности нет или все пройдены - берём из
+    полного пула: контент не должен кончаться из-за разметки.
+    """
+    exclude = exclude or set()
+    getter = diff_of or (lambda item: str(item.get("diff", "")))
+
+    level = [item for item in pool if getter(item) == difficulty]
+    if level:
+        fresh = [item for item in level if key_of(item) not in exclude]
+        if fresh:
+            return rng.choice(fresh), False
+
+    return pick_unseen(pool, key_of, rng, exclude)
+
+
 
 def normalize_answer(text: str) -> str:
     """Привести ответ к сравнимому виду: нижний регистр, без «ё» и пунктуации."""

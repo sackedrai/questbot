@@ -10,16 +10,19 @@ def main_menu() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="🎯 Квест дня", callback_data="menu:quest")
     builder.button(text="⚡ Рискованный ×2", callback_data="menu:risk")
+    builder.button(text="⏳ Когда следующий", callback_data="menu:next")
     builder.button(text="⚔️ Вызвать на бой", callback_data="menu:pvp")
+    builder.button(text="🗡 История боёв", callback_data="menu:battles")
     builder.button(text="🏆 Рейтинг", callback_data="menu:top")
     builder.button(text="👤 Профиль", callback_data="menu:profile")
+    builder.button(text="📅 Моя неделя", callback_data="menu:week")
     builder.button(text="🏅 Достижения", callback_data="menu:ach")
     builder.button(text="⚙️ Настройки", callback_data="menu:settings")
     builder.button(text="🔗 Приглашение", callback_data="menu:invite")
     builder.button(text="📝 Свой вопрос", callback_data="menu:ask")
     builder.button(text="🧹 Очистить чат", callback_data="menu:clear")
     builder.button(text="ℹ️ Как играть", callback_data="menu:help")
-    builder.adjust(1, 2, 3, 3, 2)
+    builder.adjust(1, 2, 2, 2, 2, 2)
     return builder.as_markup()
 
 
@@ -38,6 +41,7 @@ def admin_menu() -> InlineKeyboardMarkup:
     """Меню админ-раздела."""
     builder = InlineKeyboardBuilder()
     builder.button(text="📊 Статистика", callback_data="adm:stats")
+    builder.button(text="🔻 Воронка игроков", callback_data="adm:funnel")
     builder.button(text="👥 Игроки", callback_data="adm:players")
     builder.button(text="📝 Вопросы", callback_data="adm:questions")
     builder.button(text="🛠 Починить игрока", callback_data="adm:fix")
